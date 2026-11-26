@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "739346237582",
+    "project_id": "safespend-backend",
+    "storage_bucket": "safespend-backend.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:739346237582:android:b3fbe2ad35a73ff0afa1df",
+        "android_client_info": {
+          "package_name": "com.example.safespend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDk2gczZRyXpOPTEmln_g6w98yuextrhAg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
