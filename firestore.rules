@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// SafeSpend security rules.
+// Everything lives under users/{uid}. A signed-in user can read and write only
+// their own documents; nobody else can touch them, and nothing outside
+// users/{uid} is accessible at all.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // Expenses must have a positive whole-number amount (in paisa), a
+      // category, a date, and a note of at most 500 characters.
+      match /expenses/{expenseId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.categoryId is string
+          && request.resource.data.date is timestamp
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 500;
+      }
+
+      // A budget needs a whole-number, non-negative income and a list of
+      // category limits.
+      match /budgets/{monthKey} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.income is int
+          && request.resource.data.income >= 0
+          && request.resource.data.categories is list;
+      }
+
+      // The other collections. They are listed by name because rules are
+      // combined with OR: a broad wildcard here would also match expenses and
+      // budgets and let writes skip the checks above.
+      match /{collection}/{docId} {
+        allow read, write: if isOwner(uid)
+          && collection in ['categories', 'monthStats', 'monthSummaries', 'insights'];
+      }
+    }
+  }
+}

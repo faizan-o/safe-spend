@@ -8,10 +8,11 @@ class DefaultFirebaseOptions {
 
   static FirebaseOptions get currentPlatform {
     return const FirebaseOptions(
-      apiKey: 'YOUR_API_KEY',
-      appId: 'YOUR_APP_ID',
-      messagingSenderId: 'YOUR_SENDER_ID',
-      projectId: 'YOUR_PROJECT_ID',
+      apiKey: 'AIzaSyBChNx4-09LDURmGW2LaX8QlV-C1pbwbB0',
+      appId: '1:739346237582:android:b3fbe2ad35a73ff0afa1df',
+      authDomain: "safespend-backend.firebaseapp.com",
+      messagingSenderId: '739346237582',
+      projectId: 'safespend-backend',
     );
   }
 }
