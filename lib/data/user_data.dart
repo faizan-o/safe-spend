@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
 
 import '../models/user_profile.dart';
@@ -62,8 +63,7 @@ class UserData {
     try {
       existing = await profile.getProfile(serverOnly: true);
     } on FirebaseException catch (error) {
-      debugPrint(
-          'Skipping first-time setup (server unreachable): ${error.code}');
+      debugPrint('Skipping first-time setup (server unreachable): ${error.code}');
       return;
     }
     if (existing != null) return;
@@ -102,8 +102,7 @@ class UserData {
     await userDoc.delete();
   }
 
-  Future<void> _deleteCollection(
-      CollectionReference<Map<String, dynamic>> collection) async {
+  Future<void> _deleteCollection(CollectionReference<Map<String, dynamic>> collection) async {
     while (true) {
       final snapshot = await collection
           .limit(300)

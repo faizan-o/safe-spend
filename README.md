@@ -83,6 +83,12 @@ lib/
 test/validators_test.dart         unit tests for the validators
 ```
 
+## Database
+
+Data is stored in Cloud Firestore under `users/{uid}`. The schema, the decisions behind it, usage
+examples and the Firebase setup steps are in [docs/database.md](docs/database.md). Security rules are
+in `firestore.rules`.
+
 ## Next steps
 
 1. Monthly budget setup (income, fixed bills, category budgets) and storage in Cloud Firestore

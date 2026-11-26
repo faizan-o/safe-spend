@@ -106,6 +106,9 @@ class FirebaseAuthService implements AuthService {
   }
 
   @override
+  Future<String?> getIdToken() async => _auth.currentUser?.getIdToken();
+
+  @override
   Future<void> signOut() => _auth.signOut();
 
   String _messageFor(String code) {

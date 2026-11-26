@@ -52,5 +52,9 @@ abstract class AuthService {
 
   Future<void> sendPasswordReset(String email);
 
+  /// A token proving who the signed-in user is, for calling the voice
+  /// workflow. Null when the backend has no tokens (the demo backend).
+  Future<String?> getIdToken();
+
   Future<void> signOut();
 }

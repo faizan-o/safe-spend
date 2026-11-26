@@ -99,6 +99,9 @@ class LocalAuthService implements AuthService {
   Future<void> sendPasswordReset(String email) => _pretendToBeOnline();
 
   @override
+  Future<String?> getIdToken() async => null;
+
+  @override
   Future<void> signOut() async {
     await _prefs.remove(_sessionKey);
     _current = null;
