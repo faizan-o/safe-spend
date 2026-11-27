@@ -22,6 +22,9 @@ class FakeRecognizer implements SpeechRecognizer {
       available;
 
   @override
+  Future<String> describe() async => 'fake';
+
+  @override
   Future<List<SpeechLocale>> locales() async =>
       const [SpeechLocale('en_US', 'English'), SpeechLocale('ur_PK', 'Urdu')];
 

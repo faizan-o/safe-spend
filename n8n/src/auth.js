@@ -29,8 +29,19 @@ const base = { ok: true, uid, requestId, ctx, save, receiptId, locale: cleanText
 
 if (KIND === 'voice') {
   const transcript = cleanText(body.transcript, 1000);
-  if (!transcript) return out(fail(400, 'Nothing to understand: the transcript is empty.', WORKFLOW));
-  return out({ ...base, transcript });
+  let audio = null;
+  if (!transcript && typeof body.audioBase64 === 'string' && body.audioBase64) {
+    // The app can send a short recording instead of text; Gemini listens to it.
+    const AUDIO = ['audio/wav', 'audio/x-wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac'];
+    const amime = String(body.audioMimeType || 'audio/wav').toLowerCase();
+    const ab64 = body.audioBase64.replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+    if (!AUDIO.includes(amime)) return out(fail(400, 'Unsupported audio type.', WORKFLOW));
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(ab64)) return out(fail(400, 'audioBase64 is not valid base64.', WORKFLOW));
+    if (ab64.length > Math.ceil((Number(cfg.maxAudioBytes) || 3000000) * 4 / 3)) return out(fail(413, 'The recording is too long. Please say it in under 30 seconds.', WORKFLOW));
+    audio = { mimeType: amime };
+  }
+  if (!transcript && !audio) return out(fail(400, 'Nothing to understand: the transcript is empty.', WORKFLOW));
+  return out({ ...base, transcript, audio });
 }
 // receipt
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];

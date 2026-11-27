@@ -35,6 +35,7 @@ class ExpenseTile extends StatelessWidget {
     final details = [
       expense.categoryName,
       dayLabel(expense.date, now),
+      if (expense.merchant != null && expense.merchant!.isNotEmpty) expense.merchant!,
       if (expense.note.isNotEmpty) expense.note,
     ].join(' · ');
 
@@ -60,9 +61,13 @@ class ExpenseTile extends StatelessWidget {
           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         subtitle: Text(details, maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: expense.source == ExpenseSource.voice
-            ? Icon(Icons.mic, size: 18, color: scheme.onSurfaceVariant)
-            : null,
+        trailing: switch (expense.source) {
+          ExpenseSource.voice => Icon(Icons.mic, size: 18, color: scheme.onSurfaceVariant),
+          ExpenseSource.receipt => Icon(Icons.receipt_long, size: 18, color: scheme.onSurfaceVariant),
+          ExpenseSource.manual => expense.recurringId != null
+              ? Icon(Icons.autorenew, size: 18, color: scheme.onSurfaceVariant)
+              : null,
+        },
       ),
     );
   }
@@ -76,8 +81,17 @@ void deleteExpenseWithUndo(
   Expense expense,
   String symbol,
 ) {
-  final messenger = ScaffoldMessenger.of(context);
+  deleteExpenseUndoable(ScaffoldMessenger.of(context), data, expense, symbol);
+}
 
+/// Same as [deleteExpenseWithUndo] for code that already holds the messenger
+/// (for example after a bottom sheet has closed).
+void deleteExpenseUndoable(
+  ScaffoldMessengerState messenger,
+  UserData data,
+  Expense expense,
+  String symbol,
+) {
   void reportError(Object error) {
     messenger.showSnackBar(
       const SnackBar(content: Text('Could not save the change. Check your connection.')),
@@ -104,6 +118,11 @@ void deleteExpenseWithUndo(
                   date: expense.date,
                   source: expense.source,
                   transcript: expense.transcript,
+                  merchant: expense.merchant,
+                  confidence: expense.confidence,
+                  receiptId: expense.receiptId,
+                  recurringId: expense.recurringId,
+                  items: expense.items,
                 ))
                 .then((_) {}, onError: reportError);
           },

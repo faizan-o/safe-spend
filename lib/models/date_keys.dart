@@ -52,6 +52,42 @@ class DateKeys {
     return ofMonth(DateTime(parts.$1, parts.$2 + 1));
   }
 
+  /// Parses a day key such as "2026-11-26" into local midnight of that day.
+  /// Returns null when the text is not a real date.
+  static DateTime? parseDay(String? dayKey) {
+    if (dayKey == null) return null;
+    final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(dayKey);
+    if (match == null) return null;
+    final year = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final day = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    // DateTime rolls 2026-02-31 over to March; reject that.
+    if (date.year != year || date.month != month || date.day != day) return null;
+    return date;
+  }
+
+  /// Whole calendar days from [from] to [to] (negative when [to] is earlier).
+  /// Works on dates, so daylight saving changes never shift the answer.
+  static int daysBetween(DateTime from, DateTime to) {
+    final a = DateTime.utc(from.year, from.month, from.day);
+    final b = DateTime.utc(to.year, to.month, to.day);
+    return b.difference(a).inDays;
+  }
+
+  /// [date] moved by [days] calendar days, at local midnight.
+  static DateTime addDays(DateTime date, int days) =>
+      DateTime(date.year, date.month, date.day + days);
+
+  /// [date] moved by [months] months. When the day does not exist in the
+  /// target month (31 Jan + 1 month) the last day of that month is used.
+  static DateTime addMonths(DateTime date, int months, {int? dayOfMonth}) {
+    final wantedDay = dayOfMonth ?? date.day;
+    final first = DateTime(date.year, date.month + months);
+    final lastDay = DateTime(first.year, first.month + 1, 0).day;
+    return DateTime(first.year, first.month, wantedDay > lastDay ? lastDay : wantedDay);
+  }
+
   static (int, int) _parse(String monthKey) {
     if (!isValidMonthKey(monthKey)) {
       throw FormatException('Not a month key like "2026-11"', monthKey);

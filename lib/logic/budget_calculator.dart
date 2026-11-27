@@ -1,3 +1,4 @@
+import '../models/budget_period.dart';
 import '../models/category.dart';
 import '../models/date_keys.dart';
 import '../models/month_stats.dart';
@@ -11,7 +12,7 @@ enum DayStatus { onTrack, tight, over }
 /// minor units (paisa).
 ///
 /// Today's allowance is the everyday money that was left at the start of the
-/// day, divided by the days remaining (today included):
+/// day, divided by the days remaining in the budget's period (today included):
 ///
 ///     allowance = (pool - spent before today) / days left
 ///
@@ -34,7 +35,7 @@ class DailyBudget {
   /// Everyday spending today.
   final int spentToday;
 
-  /// Days left in the month, counting today.
+  /// Days left in the budget's period, counting today.
   final int daysLeft;
 
   /// What is left of the month's everyday money (negative = overspent).
@@ -68,10 +69,18 @@ class DailyBudget {
 class BudgetCalculator {
   const BudgetCalculator._();
 
-  /// Red and green flags start only from this day of the month. Before it,
-  /// one purchase would swing the pace too much to mean anything.
+  /// Red and green flags start only from this day of a month-long period.
+  /// Before it, one purchase would swing the pace too much to mean anything.
   /// Going over a category's whole limit is flagged on any day.
   static const int minDayForPaceFlags = 5;
+
+  /// The first day pace flags can appear in a period of [totalDays] days:
+  /// day 5 for a month or longer, earlier for shorter periods.
+  static int paceStartDay(int totalDays) {
+    if (totalDays >= 28) return minDayForPaceFlags;
+    if (totalDays >= 14) return 3;
+    return 2;
+  }
 
   /// A category is red when it is this much ahead of an even spending pace.
   static const double redPace = 1.15;
@@ -87,39 +96,43 @@ class BudgetCalculator {
     required int spentToday,
     required DateTime now,
   }) {
-    final daysInMonth = DateKeys.daysInMonth(DateKeys.ofMonth(now));
     return DailyBudget(
       pool: budget.flexiblePool,
       spentBeforeToday: stats.flexibleSpent - spentToday,
       spentToday: spentToday,
-      daysLeft: daysInMonth - now.day + 1,
+      daysLeft: budget.period.daysLeft(now),
     );
   }
 
   /// Red, green or no flag for one category line.
-  /// Only everyday categories with a limit are flagged.
+  /// Only everyday categories with a limit are flagged. [period] is the
+  /// budget's period; it defaults to the calendar month of [now].
   static FlagType flagFor({
     required CategoryBudget line,
     required int spent,
     required DateTime now,
+    BudgetPeriod? period,
   }) {
     if (line.kind != CategoryKind.flexible || line.limit <= 0) {
       return FlagType.none;
     }
     if (spent > line.limit) return FlagType.red;
-    if (now.day < minDayForPaceFlags) return FlagType.none;
 
-    final daysInMonth = DateKeys.daysInMonth(DateKeys.ofMonth(now));
-    final expected = line.limit * now.day / daysInMonth;
+    final p = period ?? BudgetPeriod.month(DateKeys.ofMonth(now));
+    final totalDays = p.totalDays;
+    final day = p.dayNumber(now);
+    if (day < paceStartDay(totalDays)) return FlagType.none;
+
+    final expected = line.limit * day / totalDays;
     if (spent > expected * redPace) return FlagType.red;
     if (spent <= expected * greenPace) return FlagType.green;
     return FlagType.none;
   }
 
   /// How much a category should have used by [now] if spending were even.
-  static int expectedSpend(CategoryBudget line, DateTime now) {
-    final daysInMonth = DateKeys.daysInMonth(DateKeys.ofMonth(now));
-    return (line.limit * now.day / daysInMonth).round();
+  static int expectedSpend(CategoryBudget line, DateTime now, {BudgetPeriod? period}) {
+    final p = period ?? BudgetPeriod.month(DateKeys.ofMonth(now));
+    return (line.limit * p.dayNumber(now) / p.totalDays).round();
   }
 
   /// Spending in categories that have no line in the budget.

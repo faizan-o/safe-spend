@@ -127,7 +127,8 @@ for (const file of fs.readdirSync(DIR).filter((f) => f.endsWith('.json'))) {
 
 // ---------- voice ----------
 const voice = load('safespend-voice-expense.json');
-const runVoice = (body, mocks, auth) => makeRun(voice, expenseMocks(mocks), 'Webhook', webhookItem(body, auth));
+const VCATS = [{ id: 'food', name: 'Food', kind: 'flexible' }, { id: 'groceries', name: 'Groceries', kind: 'flexible' }, { id: 'other', name: 'Other', kind: 'flexible' }, { id: 'rent', name: 'Rent', kind: 'fixed' }];
+const runVoice = (body, mocks, auth) => makeRun(voice, expenseMocks(mocks), 'Webhook', webhookItem({ categories: VCATS, ...body }, auth));
 const stat = (commit, field) => commit.writes[1].updateTransforms.find((t) => t.fieldPath === field);
 
 test('voice: confident expense is saved atomically with month totals', () => {
@@ -151,7 +152,7 @@ test('voice: confident expense is saved atomically with month totals', () => {
   assert.strictEqual(stat(commit, 'flexibleSpent').increment.integerValue, '50000');
   assert.strictEqual(stat(commit, 'expenseCount').increment.integerValue, '1');
   assert(stat(commit, 'spentByCategory.`food`')); assert(stat(commit, `spentByDay.\`${today.slice(8, 10)}\``));
-  assert(r.calls.find((c) => c.name === 'Gemini').body.generationConfig.responseSchema.properties.categoryId.enum.join() === 'food,groceries,other,rent', 'archived category must not be offered');
+  assert(r.calls.find((c) => c.name === 'Gemini').body.generationConfig.responseSchema.properties.categoryId.enum.join() === 'food,groceries,other,rent', 'only the categories sent by the app are offered');
 });
 test('voice: fixed category does not add to flexibleSpent', () => {
   const r = runVoice(baseBody({ transcript: 'rent 25000' }), { Gemini: () => toolUse({ status: 'parsed', message: 'ok', amount: 25000, categoryId: 'rent', confidence: 0.99 }) });
@@ -189,8 +190,8 @@ test('voice: needs_clarification and failed pass through', () => {
   const r = runVoice(baseBody({ transcript: 'bought lunch' }), { Gemini: () => toolUse({ status: 'needs_clarification', message: 'How much?', confidence: 0.2 }) });
   assert.strictEqual(r.responses[0].body.status, 'needs_clarification'); assert(!r.responses[0].body.saved);
 });
-test('voice: no categories in Firestore uses the default ids', () => {
-  const r = runVoice(baseBody({ transcript: 'x' }), { 'Load categories': () => ({ statusCode: 200, body: {} }), Gemini: () => toolUse({ status: 'parsed', message: 'ok', amount: 5, categoryId: 'transport', confidence: 0.9 }) });
+test('voice: no categories sent uses the default ids', () => {
+  const r = runVoice(baseBody({ transcript: 'x', categories: [] }), { Gemini: () => toolUse({ status: 'parsed', message: 'ok', amount: 5, categoryId: 'transport', confidence: 0.9 }) });
   assert.strictEqual(r.responses[0].body.expense.categoryId, 'transport'); assert.strictEqual(r.responses[0].body.saved, true);
 });
 test('voice: bad or foreign tokens and bodies are rejected before any AI call', () => {
@@ -208,6 +209,17 @@ test('voice: AI outage becomes a friendly 503/502', () => {
   r = runVoice(baseBody({ transcript: 'x' }), { Gemini: () => ({ statusCode: 400, body: { error: { message: 'API key not valid' } } }) });
   assert.strictEqual(r.responses[0].code, 200);
   assert(r.responses[0].body.message.includes('API key not valid'));
+});
+test('voice: a recording is sent to Gemini and the heard words come back', () => {
+  let sent = null;
+  const r = runVoice(baseBody({ audioBase64: 'UklGRg==', audioMimeType: 'audio/wav' }), {
+    Gemini: (req) => { sent = req; return toolUse({ heard: 'lunch pe teen sau kharch', status: 'parsed', message: 'ok', amount: 300, categoryId: 'food', confidence: 0.95 }); },
+  });
+  assert.strictEqual(r.responses[0].body.status, 'parsed');
+  assert.strictEqual(r.responses[0].body.transcript, 'lunch pe teen sau kharch');
+  assert(JSON.stringify(sent.body || sent).includes('inlineData'));
+  const bad = runVoice(baseBody({ audioBase64: '!!!', audioMimeType: 'audio/wav' }), {});
+  assert.strictEqual(bad.responses[0].code, 400);
 });
 test('voice: when Gemini is busy the fallback model answers', () => {
   const r = runVoice(baseBody({ transcript: 'lunch 300' }), {

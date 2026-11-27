@@ -4,6 +4,11 @@ rules_version = '2';
 // Everything lives under users/{uid}. A signed-in user can read and write only
 // their own documents; nobody else can touch them, and nothing outside
 // users/{uid} is accessible at all.
+//
+// Expenses, incomes, recurring items and debts each have their own rule that
+// checks the important fields. The wildcard rule at the bottom lists the
+// remaining collections by name, because rules are combined with OR: a broad
+// wildcard would also match those four and let writes skip their checks.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -35,6 +40,50 @@ service cloud.firestore {
           && request.resource.data.income is int
           && request.resource.data.income >= 0
           && request.resource.data.categories is list;
+      }
+
+      // Income: a positive whole-number amount, a source, a date and a short note.
+      match /incomes/{incomeId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.source is string
+          && request.resource.data.source.size() > 0
+          && request.resource.data.source.size() <= 100
+          && request.resource.data.date is timestamp
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 500;
+      }
+
+      // Bills, rent, fees and standing payments with a due date. Dates are
+      // "yyyy-MM-dd" text.
+      match /recurring/{recurringId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 100
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.type in ['expense', 'income']
+          && request.resource.data.frequency in ['once', 'daily', 'weekly', 'monthly', 'yearly']
+          && request.resource.data.nextDueDay is string
+          && request.resource.data.nextDueDay.size() == 10;
+      }
+
+      // Money owed by or to the user. Repayments are kept in the payments list.
+      match /debts/{debtId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.person is string
+          && request.resource.data.person.size() > 0
+          && request.resource.data.person.size() <= 100
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.direction in ['owedByMe', 'owedToMe']
+          && request.resource.data.date is timestamp
+          && request.resource.data.payments is list;
       }
 
       // The other collections. They are listed by name because rules are

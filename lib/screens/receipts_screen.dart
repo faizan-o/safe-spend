@@ -296,6 +296,34 @@ class ReceiptDetailScreen extends StatelessWidget {
     if (saved == true && context.mounted) Navigator.of(context).pop();
   }
 
+  /// Opens the expense saved from this receipt so its total, category, shop,
+  /// date and items can be corrected.
+  Future<void> _editExpense(BuildContext context) async {
+    final id = receipt.expenseId;
+    if (id == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final expense = await data.expenses.getExpense(id);
+    if (!context.mounted) return;
+    if (expense == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('That expense was deleted, so there is nothing to edit.')));
+      return;
+    }
+    final categories = await data.categories.watchCategories().first;
+    final profile = await data.profile.watchProfile().first;
+    if (!context.mounted) return;
+    final saved = await showExpenseSheet(
+      context,
+      data: data,
+      categories: categories,
+      symbol: profile?.currencySymbol ?? 'Rs.',
+      existing: expense,
+      onSaved: (updated) => data.receipts
+          .syncFromExpense(receipt.id, updated)
+          .then((_) {}, onError: (Object _) {}),
+    );
+    if (saved == true && context.mounted) Navigator.of(context).pop();
+  }
+
   Future<void> _delete(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
@@ -376,6 +404,14 @@ class ReceiptDetailScreen extends StatelessWidget {
           row('Total', receipt.amount == null ? null : Money.format(receipt.amount!, symbol: 'Rs.', showDecimals: receipt.amount! % 100 != 0)),
           row('Category', receipt.categoryName),
           row('Note', receipt.message),
+          if (receipt.expenseId != null) ...[
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: () => unawaited(_editExpense(context)),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Edit expense details'),
+            ),
+          ],
           if (canAdd) ...[
             const SizedBox(height: 20),
             FilledButton.icon(

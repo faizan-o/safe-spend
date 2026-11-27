@@ -96,7 +96,7 @@ class SafeToSpendCard extends StatelessWidget {
             Text(
               daily.remainingPool >= 0
                   ? '${Money.format(daily.remainingPool, symbol: symbol)} left in your everyday budget for ${plural(daily.daysLeft, 'day')}.'
-                  : 'You are ${Money.format(-daily.remainingPool, symbol: symbol)} over your everyday budget this month.',
+                  : 'You are ${Money.format(-daily.remainingPool, symbol: symbol)} over your everyday budget.',
               style: theme.textTheme.bodyMedium?.copyWith(color: foreground),
             ),
           ],

@@ -10,6 +10,9 @@
 ///   insights/{dayKey}              daily reminder suggestions
 ///   receipts/{receiptId}           photographed receipts (record + small thumbnail)
 ///   receiptImages/{receiptId}      the compressed receipt picture (one Firestore document)
+///   incomes/{incomeId}             money received
+///   recurring/{recurringId}        bills, rent, fees and standing payments with due dates
+///   debts/{debtId}                 money owed by or to the user, with repayments
 class FirestorePaths {
   const FirestorePaths._();
 
@@ -22,4 +25,7 @@ class FirestorePaths {
   static const insights = 'insights';
   static const receipts = 'receipts';
   static const receiptImages = 'receiptImages';
+  static const incomes = 'incomes';
+  static const recurring = 'recurring';
+  static const debts = 'debts';
 }

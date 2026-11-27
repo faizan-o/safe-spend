@@ -24,17 +24,50 @@ class ExpenseRepository {
 
   /// Saves a new expense and returns its generated id.
   Future<String> addExpense(Expense expense) async {
-    _checkAmount(expense);
-    final ref = _expenses.doc();
-    final batch = _firestore.batch()
-      ..set(ref, {
-        ...expense.toMap(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    _queueStats(batch, [(expense, 1)]);
+    final batch = _firestore.batch();
+    final id = queueAdd(batch, expense);
     await batch.commit();
+    return id;
+  }
+
+  /// Adds a new expense (and its month totals) to [batch] without committing.
+  /// Pass [id] to save under a chosen document id, for example so a recurring
+  /// payment can never be recorded twice. Returns the id.
+  String queueAdd(WriteBatch batch, Expense expense, {String? id}) {
+    _checkAmount(expense);
+    final ref = id == null ? _expenses.doc() : _expenses.doc(id);
+    batch.set(ref, {
+      ...expense.toMap(),
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    _queueStats(batch, [(expense, 1)]);
     return ref.id;
+  }
+
+  /// Whether an expense with this id exists (the device's copy counts, so a
+  /// write still waiting to sync is found too).
+  Future<bool> exists(String id) async {
+    final ref = _expenses.doc(id);
+    // The device's own copy first: it includes writes still waiting to sync.
+    try {
+      final cached = await ref.get(const GetOptions(source: Source.cache));
+      if (cached.exists) return true;
+    } catch (_) {}
+    // Then the server, but never wait long: offline, an unknown id counts as new.
+    try {
+      final snapshot = await ref.get().timeout(const Duration(seconds: 4));
+      return snapshot.exists;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// One expense, or null when it does not exist.
+  Future<Expense?> getExpense(String id) async {
+    final snapshot = await _expenses.doc(id).get();
+    final data = snapshot.data();
+    return data == null ? null : Expense.fromMap(snapshot.id, data);
   }
 
   /// Saves an edited expense. [previous] must be the expense as it was before
@@ -71,6 +104,11 @@ class ExpenseRepository {
       DateKeys.startOfMonth(monthKey),
       DateKeys.endOfMonthExclusive(monthKey),
     ).snapshots().map(_parse);
+  }
+
+  /// Live expenses from [start] up to (not including) [endExclusive], newest first.
+  Stream<List<Expense>> watchRange(DateTime start, DateTime endExclusive) {
+    return _inRange(start, endExclusive).snapshots().map(_parse);
   }
 
   /// Live expenses of one day, newest first.
@@ -115,6 +153,14 @@ class ExpenseRepository {
         );
   }
 
+  /// Live running totals of every month that has any (a few small documents).
+  /// The balance is worked out from these.
+  Stream<List<MonthStats>> watchAllStats() {
+    return _stats.snapshots().map((snapshot) => [
+          for (final doc in snapshot.docs) MonthStats.fromMap(doc.id, doc.data()),
+        ]);
+  }
+
   Future<MonthStats> getStats(String monthKey) async {
     final snapshot = await _stats.doc(monthKey).get();
     return MonthStats.fromMap(monthKey, snapshot.data() ?? const {});
@@ -132,10 +178,22 @@ class ExpenseRepository {
       delta.add(expense, 1);
     }
     final stats = delta.toStats(monthKey);
-    await _stats.doc(monthKey).set({
-      ...stats.toMap(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    // Only the spending fields are replaced; income totals are left alone.
+    await _stats.doc(monthKey).set(
+      {
+        ...stats.toExpenseMap(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(mergeFields: [
+        'monthKey',
+        'totalSpent',
+        'flexibleSpent',
+        'expenseCount',
+        'spentByCategory',
+        'spentByDay',
+        'updatedAt',
+      ]),
+    );
     return stats;
   }
 

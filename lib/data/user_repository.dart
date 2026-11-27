@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../models/date_keys.dart';
 import '../models/user_profile.dart';
 
 /// Reads and writes the profile document users/{uid}.
@@ -36,6 +37,15 @@ class UserRepository {
 
   Future<void> updateReminder(ReminderSettings reminder) {
     return _doc.update({'reminder': reminder.toMap()});
+  }
+
+  /// Saves the opening balance: the money the user had on [day]. Everything
+  /// recorded from that day on is added to it to get the current balance.
+  Future<void> updateOpeningBalance({required int amount, required DateTime day}) {
+    return _doc.update({
+      'openingBalance': amount,
+      'openingBalanceDay': DateKeys.ofDay(day),
+    });
   }
 
   Future<void> markOnboardingComplete() {

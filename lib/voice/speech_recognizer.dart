@@ -19,6 +19,9 @@ abstract class SpeechRecognizer {
     required void Function(String error) onError,
   });
 
+  /// A short technical description (permission, languages) for the mic details panel.
+  Future<String> describe() async => '';
+
   Future<List<SpeechLocale>> locales();
 
   Future<String?> systemLocaleId();
@@ -53,11 +56,25 @@ class PluginSpeechRecognizer implements SpeechRecognizer {
       _ready = await _speech.initialize(
         onStatus: onStatus,
         onError: (error) => onError(error.errorMsg),
+        debugLogging: true,
       );
     } catch (_) {
       _ready = false;
     }
     return _ready;
+  }
+
+  @override
+  Future<String> describe() async {
+    try {
+      final permission = await _speech.hasPermission;
+      final list = _ready ? await _speech.locales() : const <LocaleName>[];
+      final system = _ready ? (await _speech.systemLocale())?.localeId : null;
+      return 'ready=$_ready, permission=$permission, available=${_speech.isAvailable}, '
+          'languages=${list.length}, device language=${system ?? '-'}';
+    } catch (error) {
+      return 'could not read the state: $error';
+    }
   }
 
   @override

@@ -98,6 +98,10 @@ class _Understood extends StatelessWidget {
             ),
           ],
         ),
+        if (draft.transcript != null && draft.transcript!.trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text('You said: "${draft.transcript!.trim()}"', style: theme.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic)),
+        ],
         if (draft.merchant != null && draft.merchant!.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text('Shop: ${draft.merchant}', style: theme.textTheme.bodyMedium),
@@ -177,6 +181,7 @@ String? _reasonText(String reason) => switch (reason) {
       'old_date' => 'The date is quite old.',
       'currency_mismatch' => 'This looks like a different currency from yours.',
       'save_failed' => "I couldn't save it automatically.",
+      'heard_from_audio' => 'Please check that I heard you correctly.',
       _ => null,
     };
 

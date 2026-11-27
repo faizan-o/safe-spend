@@ -120,6 +120,18 @@ class ReceiptRepository implements ReceiptVault {
     }, SetOptions(merge: true));
   }
 
+  /// Copies what the user changed in the expense (total, category, shop) onto
+  /// the receipt record, so the receipt list shows the corrected values.
+  Future<void> syncFromExpense(String receiptId, Expense expense) {
+    return _collection.doc(receiptId).set({
+      'amount': expense.amount,
+      'categoryId': expense.categoryId,
+      'categoryName': expense.categoryName,
+      'merchant': expense.merchant ?? FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   @override
   Future<void> markDiscarded(String receiptId) {
     return _collection.doc(receiptId).set({

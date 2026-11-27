@@ -10,6 +10,8 @@ import '../utils/platform_support.dart';
 import '../utils/receipt_image.dart';
 import '../voice/receipt_client.dart';
 import '../voice/speech_recognizer.dart';
+import '../config/voice_config.dart';
+import '../voice/audio_capture.dart';
 import '../voice/voice_controller.dart';
 import '../voice/voice_workflow_client.dart';
 import '../widgets/auth_widgets.dart';
@@ -56,6 +58,8 @@ class VoiceScreenState extends State<VoiceScreen> {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   String? _profileName;
 
+  bool _showMicDetails = false;
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +69,9 @@ class VoiceScreenState extends State<VoiceScreen> {
       workflow: createVoiceWorkflowClient(widget.auth),
       receipts: createReceiptClient(widget.auth),
       vault: widget.data.receipts,
+      // With n8n connected, the voice is recorded and Gemini listens to it, so it works
+      // on every phone, in the browser and on desktop. Otherwise the phone's own recognizer is used.
+      capture: VoiceConfig.hasBackend ? PcmAudioCapture() : null,
       saveExpense: (expense) => widget.data.expenses.addExpense(expense),
     );
     _subscriptions.add(widget.data.categories
@@ -206,7 +213,7 @@ class VoiceScreenState extends State<VoiceScreen> {
           PopupMenuButton<String>(
             tooltip: 'Menu',
             onSelected: (value) {
-              if (value == 'settings') openSettings(context, widget.auth, widget.user);
+              if (value == 'settings') openSettings(context, widget.auth, widget.user, data: widget.data);
               if (value == 'signout') unawaited(widget.auth.signOut());
             },
             itemBuilder: (_) => const [
@@ -274,6 +281,27 @@ class VoiceScreenState extends State<VoiceScreen> {
                     ),
                   ),
                 ],
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      setState(() => _showMicDetails = !_showMicDetails);
+                      if (_showMicDetails) unawaited(c.refreshMicDetails());
+                    },
+                    child: Text(_showMicDetails ? 'Hide mic details' : 'Mic not working? Mic details'),
+                  ),
+                ),
+                if (_showMicDetails)
+                  Card(
+                    elevation: 0,
+                    color: scheme.surfaceContainerHighest,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SelectableText(
+                        c.micLog.isEmpty ? 'Nothing recorded yet. Tap the mic and speak.' : c.micLog.join('\n'),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
                 if (c.languages.length > 1) ...[
                   const SizedBox(height: 16),
                   Center(child: _languagePicker(c)),

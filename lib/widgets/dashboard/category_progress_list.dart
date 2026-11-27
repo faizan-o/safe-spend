@@ -52,7 +52,7 @@ class CategoryProgressList extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${Money.format(unbudgeted, symbol: symbol)} was spent in categories that are not in this month\'s budget.',
+                    '${Money.format(unbudgeted, symbol: symbol)} was spent in categories that are not in this budget.',
                     style: theme.textTheme.bodySmall,
                   ),
                 ),

@@ -47,7 +47,7 @@ class N8nVoiceWorkflowClient implements VoiceWorkflowClient {
     required this.webhookUrl,
     this.idToken,
     http.Client? client,
-    this.timeout = const Duration(seconds: 30),
+    this.timeout = const Duration(seconds: 60),
   }) : _client = client ?? http.Client();
 
   final String webhookUrl;
@@ -152,6 +152,14 @@ class DummyVoiceWorkflowClient implements VoiceWorkflowClient {
   @override
   Future<VoiceWorkflowResult> submit(VoiceWorkflowRequest request) async {
     await Future<void>.delayed(delay);
+
+    if (request.audio != null) {
+      return const VoiceWorkflowResult(
+        status: VoiceWorkflowStatus.needsClarification,
+        message: 'Test mode cannot listen to recordings. Connect n8n (N8N_BASE_URL) or type it below.',
+        workflow: 'dummy',
+      );
+    }
 
     final text = request.transcript.trim();
     final amount = _findAmount(text);

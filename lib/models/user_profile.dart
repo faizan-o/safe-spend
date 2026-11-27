@@ -42,6 +42,8 @@ class UserProfile {
     this.currencySymbol = 'Rs.',
     this.reminder = const ReminderSettings(),
     this.onboardingComplete = false,
+    this.openingBalance = 0,
+    this.openingBalanceDay,
     this.createdAt,
   });
 
@@ -54,7 +56,16 @@ class UserProfile {
 
   /// True once the user has finished first-time setup (their first budget).
   final bool onboardingComplete;
+
+  /// The money the user had when they started using the app, in minor units,
+  /// and the day ("yyyy-MM-dd") that number is true for. Everything recorded
+  /// from that day on is added to it to get the current balance.
+  final int openingBalance;
+  final String? openingBalanceDay;
   final DateTime? createdAt;
+
+  /// True once the user has entered an opening balance.
+  bool get hasOpeningBalance => openingBalanceDay != null;
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> map) {
     return UserProfile(
@@ -65,6 +76,8 @@ class UserProfile {
       currencySymbol: readString(map, 'currencySymbol', 'Rs.'),
       reminder: ReminderSettings.fromMap(readMap(map, 'reminder')),
       onboardingComplete: readBool(map, 'onboardingComplete'),
+      openingBalance: readInt(map, 'openingBalance'),
+      openingBalanceDay: readStringOrNull(map, 'openingBalanceDay'),
       createdAt: readDate(map, 'createdAt'),
     );
   }
@@ -76,5 +89,9 @@ class UserProfile {
         'currencySymbol': currencySymbol,
         'reminder': reminder.toMap(),
         'onboardingComplete': onboardingComplete,
+        if (openingBalanceDay != null) ...{
+          'openingBalance': openingBalance,
+          'openingBalanceDay': openingBalanceDay,
+        },
       };
 }

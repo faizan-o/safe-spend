@@ -34,6 +34,27 @@
       "needsReview",
       "failed",
       "discarded"
+    ],
+    "PeriodType": [
+      "weekly",
+      "monthly",
+      "yearly",
+      "custom"
+    ],
+    "RecurringType": [
+      "expense",
+      "income"
+    ],
+    "Frequency": [
+      "once",
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly"
+    ],
+    "DebtDirection": [
+      "owedByMe",
+      "owedToMe"
     ]
   },
   "collections": {
@@ -45,6 +66,8 @@
         "currencySymbol",
         "reminder",
         "onboardingComplete",
+        "openingBalance",
+        "openingBalanceDay",
         "createdAt"
       ]
     },
@@ -63,8 +86,13 @@
         "monthKey",
         "income",
         "categories[{categoryId,name,iconKey,colorValue,kind,limit}]",
+        "title",
+        "periodType",
+        "startDay",
+        "endDay",
         "updatedAt"
-      ]
+      ],
+      "note": "Doc id is the month key for a budget that is exactly one calendar month (the monthly report reads those); any other period gets a generated id. 'income' is the money budgeted for the period. startDay/endDay are inclusive 'yyyy-MM-dd'; old documents without them cover the whole month of monthKey."
     },
     "users/{uid}/expenses/{expenseId}": {
       "required": [
@@ -84,6 +112,7 @@
         "confidence",
         "requestId",
         "receiptId",
+        "recurringId",
         "items[{description,amount,quantity}]",
         "createdAt",
         "updatedAt"
@@ -102,9 +131,12 @@
         "expenseCount",
         "spentByCategory{categoryId:int}",
         "spentByDay{dd:int}",
+        "totalIncome",
+        "incomeCount",
+        "incomeByDay{dd:int}",
         "updatedAt"
       ],
-      "invariant": "updated with increments in the SAME atomic commit as every expense add/edit/delete; only flexible categories add to flexibleSpent"
+      "invariant": "updated with increments in the SAME atomic commit as every expense add/edit/delete; only flexible categories add to flexibleSpent; income totals are updated the same way by every income add/edit/delete"
     },
     "users/{uid}/monthSummaries/{monthKey}": {
       "fields": [
@@ -148,6 +180,82 @@
       ],
       "image": "the compressed JPEG is in users/{uid}/receiptImages/{receiptId} as {data: bytes, mimeType, sizeBytes, createdAt} (written by the app; the workflows never read it)",
       "note": "the receipt workflow sets status=saved, expenseId, amount, category and merchant in the same commit as the expense when it auto-saves"
+    },
+    "users/{uid}/incomes/{incomeId}": {
+      "required": [
+        "amount",
+        "source",
+        "note",
+        "date",
+        "dayKey",
+        "monthKey"
+      ],
+      "optional": [
+        "recurringId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "rules": [
+        "amount is an int > 0",
+        "date is a timestamp",
+        "source is 1-100 chars",
+        "note <= 500 chars"
+      ]
+    },
+    "users/{uid}/recurring/{recurringId}": {
+      "required": [
+        "title",
+        "type",
+        "amount",
+        "frequency",
+        "interval",
+        "startDay",
+        "nextDueDay",
+        "autoRecord",
+        "remindDays",
+        "note",
+        "active"
+      ],
+      "optional": [
+        "categoryId",
+        "categoryName",
+        "categoryKind",
+        "endDay",
+        "lastPaidDay",
+        "createdAt",
+        "updatedAt"
+      ],
+      "rules": [
+        "amount is an int > 0",
+        "type is expense or income",
+        "frequency is once, daily, weekly, monthly or yearly",
+        "dates are 'yyyy-MM-dd' text"
+      ],
+      "note": "A bill, fee, rent or standing income. Paying it creates an expense or income with the id rec_{recurringId}_{dueDay} (so a due date is never recorded twice) and moves nextDueDay on in the same commit."
+    },
+    "users/{uid}/debts/{debtId}": {
+      "required": [
+        "direction",
+        "person",
+        "amount",
+        "date",
+        "dayKey",
+        "note",
+        "payments[{id,amount,date,note}]",
+        "paidTotal",
+        "affectsBalance"
+      ],
+      "optional": [
+        "dueDay",
+        "createdAt",
+        "updatedAt"
+      ],
+      "rules": [
+        "amount is an int > 0",
+        "direction is owedByMe (I borrowed) or owedToMe (I lent)",
+        "date is a timestamp",
+        "payments is a list"
+      ]
     }
   },
   "defaultCategories": [

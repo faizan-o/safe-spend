@@ -46,6 +46,7 @@ class Expense {
     this.confidence,
     this.requestId,
     this.receiptId,
+    this.recurringId,
     this.items = const [],
     this.createdAt,
     this.updatedAt,
@@ -85,6 +86,10 @@ class Expense {
   /// The receipt (users/{uid}/receipts/{receiptId}) this expense came from.
   final String? receiptId;
 
+  /// The recurring payment (users/{uid}/recurring/{id}) this expense was
+  /// recorded from, when it came from a bill or standing payment.
+  final String? recurringId;
+
   /// Line items, for receipts.
   final List<ExpenseItem> items;
   final DateTime? createdAt;
@@ -108,6 +113,7 @@ class Expense {
       confidence: map['confidence'] is num ? (map['confidence'] as num).toDouble() : null,
       requestId: readStringOrNull(map, 'requestId'),
       receiptId: readStringOrNull(map, 'receiptId'),
+      recurringId: readStringOrNull(map, 'recurringId'),
       items: readMapList(map, 'items').map(ExpenseItem.fromMap).toList(),
       createdAt: readDate(map, 'createdAt'),
       updatedAt: readDate(map, 'updatedAt'),
@@ -132,14 +138,18 @@ class Expense {
         if (confidence != null) 'confidence': confidence,
         if (requestId != null) 'requestId': requestId,
         if (receiptId != null) 'receiptId': receiptId,
+        if (recurringId != null) 'recurringId': recurringId,
         if (items.isNotEmpty) 'items': items.map((i) => i.toMap()).toList(),
       };
 
+  /// A copy with some fields changed. An empty [merchant] clears the shop name.
   Expense copyWith({
     int? amount,
     ExpenseCategory? category,
     String? note,
     DateTime? date,
+    String? merchant,
+    List<ExpenseItem>? items,
   }) {
     return Expense(
       id: id,
@@ -151,11 +161,12 @@ class Expense {
       date: date ?? this.date,
       source: source,
       transcript: transcript,
-      merchant: merchant,
+      merchant: merchant == null ? this.merchant : (merchant.isEmpty ? null : merchant),
       confidence: confidence,
       requestId: requestId,
       receiptId: receiptId,
-      items: items,
+      recurringId: recurringId,
+      items: items ?? this.items,
       createdAt: createdAt,
       updatedAt: updatedAt,
     );

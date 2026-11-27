@@ -5,7 +5,7 @@ import '../../models/month_stats.dart';
 import '../../models/monthly_budget.dart';
 import '../../utils/formatters.dart';
 
-/// Where the month's money goes: income, fixed bills, savings goal and the
+/// Where the budget's money goes: income, fixed bills, savings goal and the
 /// everyday budget, with how much of the everyday budget is used.
 class MonthOverviewCard extends StatelessWidget {
   const MonthOverviewCard({
@@ -39,11 +39,11 @@ class MonthOverviewCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              monthTitle(budget.monthKey),
+              '${budgetName(budget)} · ${periodLabel(budget.startDate, budget.endDate)}',
               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
-            _Line(label: 'Income', value: money(budget.income)),
+            _Line(label: 'Money to budget', value: money(budget.income)),
             _Line(label: 'Fixed bills', value: '- ${money(budget.totalFixed)}'),
             _Line(label: 'Savings goal', value: '- ${money(budget.savingsGoal)}'),
             const Divider(height: 24),

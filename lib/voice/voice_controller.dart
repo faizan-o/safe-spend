@@ -6,6 +6,7 @@ import '../models/category.dart';
 import '../models/expense.dart';
 import '../models/money.dart';
 import '../models/user_profile.dart';
+import 'audio_capture.dart';
 import 'receipt_client.dart';
 import 'receipt_vault.dart';
 import 'speech_recognizer.dart';
@@ -50,6 +51,7 @@ class VoiceController extends ChangeNotifier {
     required this.saveExpense,
     ReceiptClient? receipts,
     this.vault,
+    this.capture,
     DateTime Function()? clock,
   })  : receipts = receipts ?? DummyReceiptClient(),
         _now = clock ?? DateTime.now;
@@ -68,6 +70,10 @@ class VoiceController extends ChangeNotifier {
   /// Saves the confirmed expense and returns its id (the app passes the
   /// Firestore repository).
   final Future<String> Function(Expense expense) saveExpense;
+
+  /// Records the voice so the workflow can listen to it (works on every device).
+  /// When null, or when it cannot start, the phone's own speech recognizer is used.
+  final AudioCapture? capture;
   final DateTime Function() _now;
 
   /// Microphone loudness from 0 to 1, for the pulsing ring around the button.
@@ -82,6 +88,22 @@ class VoiceController extends ChangeNotifier {
 
   /// Why speech is unavailable, for the screen to show.
   String? speechProblem;
+
+  /// The last few microphone events, shown in the "Mic details" panel to find out why it is silent.
+  final List<String> micLog = [];
+
+  void _log(String line) {
+    final t = _now();
+    final stamp = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
+    micLog.add('$stamp $line');
+    if (micLog.length > 12) micLog.removeAt(0);
+  }
+
+  /// Fills the log with the recognizer's current state.
+  Future<void> refreshMicDetails() async {
+    _log(await recognizer.describe());
+    _notify();
+  }
 
   List<LanguageOption> languages = const [];
   String? selectedLocaleId;
@@ -102,6 +124,13 @@ class VoiceController extends ChangeNotifier {
   String currencyCode = 'PKR';
 
   Timer? _statusTimer;
+  Timer? _maxRecordingTimer;
+  bool _recording = false; // true while the microphone is feeding [capture]
+  bool _captureBroken = false;
+  bool _heardVoice = false;
+  double _peakLevel = 0;
+  DateTime? _quietSince;
+  DateTime? _recordingStart;
   int _requestCounter = 0;
   bool _disposed = false;
 
@@ -130,7 +159,16 @@ class VoiceController extends ChangeNotifier {
   }
 
   Future<bool> _initSpeech() async {
-    speechAvailable = await recognizer.initialize(onStatus: _onStatus, onError: _onError);
+    try {
+      speechAvailable = await recognizer
+          .initialize(onStatus: _onStatus, onError: _onError)
+          .timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      speechAvailable = false;
+      _log('start-up timed out (no answer from the speech service in 10 s)');
+    }
+    _log('speech start-up: ${speechAvailable ? 'ok' : 'failed'}');
+    _log(await recognizer.describe());
     if (!speechAvailable) {
       speechProblem = 'Voice input is not available. Allow microphone and speech access in '
           'your phone settings, or type what you spent below.';
@@ -190,10 +228,13 @@ class VoiceController extends ChangeNotifier {
   }
 
   Future<void> startListening() async {
-    if (state == VoiceState.sending || state == VoiceState.initializing) return;
+    if (state == VoiceState.sending) return;
     if (state == VoiceState.listening) return;
 
+    if (capture != null && !_captureBroken && await _startRecording()) return;
+
     if (!speechAvailable && !await _initSpeech()) {
+      if (state == VoiceState.initializing) state = VoiceState.ready;
       errorMessage = speechProblem;
       _notify();
       return;
@@ -201,6 +242,7 @@ class VoiceController extends ChangeNotifier {
 
     _clearOutput();
     state = VoiceState.listening;
+    _log('listening started (language ${selectedLocaleId ?? 'default'})');
     _notify();
     try {
       await recognizer.start(
@@ -208,15 +250,96 @@ class VoiceController extends ChangeNotifier {
         onResult: _onSpeech,
         onLevel: _onLevel,
       );
-    } catch (_) {
-      _backToReady(error: 'Could not start the microphone. Please try again.');
+    } catch (error) {
+      _log('start failed: $error');
+      _backToReady(error: 'Could not start the microphone ($error). Please try again.');
     }
+  }
+
+  /// Starts recording for the workflow to listen to. False when that is not possible.
+  Future<bool> _startRecording() async {
+    _clearOutput();
+    try {
+      final ok = await capture!.start(onLevel: _onAudioLevel);
+      if (!ok) {
+        _log('recording: microphone permission refused');
+        _captureBroken = true;
+        errorMessage = 'The microphone is blocked. Allow microphone access for this app (or site) and try again, or type what you spent below.';
+        _notify();
+        return true; // handled: nothing else to try, the permission is the problem
+      }
+    } catch (error) {
+      _log('recording failed: $error');
+      _captureBroken = true; // fall back to the phone's speech recognizer
+      return false;
+    }
+    _recording = true;
+    _heardVoice = false;
+    _peakLevel = 0;
+    _quietSince = null;
+    _recordingStart = _now();
+    state = VoiceState.listening;
+    _log('recording started');
+    _maxRecordingTimer?.cancel();
+    _maxRecordingTimer = Timer(const Duration(seconds: 28), () => unawaited(stopListening()));
+    _notify();
+    return true;
+  }
+
+  void _onAudioLevel(double level) {
+    if (_disposed || !_recording) return;
+    soundLevel.value = level;
+    final now = _now();
+    // Microphones differ a lot (laptops are quiet), so the thresholds follow the loudest sound heard.
+    if (level > _peakLevel) _peakLevel = level;
+    final voiceAbove = (_peakLevel * 0.4).clamp(0.04, 0.12);
+    final quietBelow = voiceAbove * 0.66;
+    final pause = Duration(milliseconds: kIsWeb ? 1400 : 1000);
+    if (level > voiceAbove) {
+      _heardVoice = true;
+      _quietSince = null;
+    } else if (level < quietBelow) {
+      _quietSince ??= now;
+      final quietFor = now.difference(_quietSince!);
+      // Stop by itself after a pause in speech, or when nothing is said at all.
+      if (_heardVoice && quietFor > pause) {
+        unawaited(stopListening());
+      } else if (!_heardVoice && now.difference(_recordingStart ?? now) > const Duration(seconds: 9)) {
+        unawaited(stopListening());
+      }
+    }
+  }
+
+  Future<void> _finishRecording() async {
+    _maxRecordingTimer?.cancel();
+    _recording = false;
+    soundLevel.value = 0;
+    Uint8List? wav;
+    try {
+      wav = await capture!.stop();
+    } catch (error) {
+      _log('stopping the recording failed: $error');
+    }
+    if (_disposed) return;
+    if (wav == null) {
+      _log('recording: no sound');
+      _backToReady(
+        notice: "I didn't hear anything. Check that the right microphone is selected and speak right after tapping the mic, or type it below.",
+      );
+      return;
+    }
+    _log('recording: ${capture!.info ?? '${wav.length ~/ 1024} KB'} sent');
+    unawaited(_submitAudio(wav));
   }
 
   /// Stops the microphone. The recognizer then delivers the final words; if it
   /// does not, a short timer finishes the job.
   Future<void> stopListening() async {
     if (state != VoiceState.listening) return;
+    if (_recording) {
+      await _finishRecording();
+      return;
+    }
     try {
       await recognizer.stop();
     } catch (_) {
@@ -230,6 +353,19 @@ class VoiceController extends ChangeNotifier {
   Future<void> cancelListening() async {
     if (state != VoiceState.listening) return;
     _statusTimer?.cancel();
+    _maxRecordingTimer?.cancel();
+    if (_recording) {
+      _recording = false;
+      try {
+        await capture!.cancel();
+      } catch (_) {}
+      if (_disposed) return;
+      transcript = '';
+      state = VoiceState.ready;
+      soundLevel.value = 0;
+      _notify();
+      return;
+    }
     try {
       await recognizer.cancel();
     } catch (_) {}
@@ -242,6 +378,7 @@ class VoiceController extends ChangeNotifier {
 
   void _onSpeech(String text, bool isFinal) {
     if (_disposed || state != VoiceState.listening) return;
+    if (isFinal || transcript.isEmpty) _log('heard${isFinal ? ' (final)' : ''}: "$text"');
     transcript = text;
     _notify();
     if (isFinal) _finishSpeech();
@@ -256,19 +393,39 @@ class VoiceController extends ChangeNotifier {
   }
 
   void _onStatus(String status) {
-    if (_disposed || state != VoiceState.listening) return;
+    if (_disposed) return;
+    _log('status: $status');
+    if (state != VoiceState.listening) return;
     if (status == 'done' || status == 'notListening' || status == 'doneNoResult') {
       _armFinishTimer(const Duration(milliseconds: 700));
     }
   }
 
   void _onError(String error) {
-    if (_disposed || state != VoiceState.listening) return;
+    if (_disposed) return;
+    _log('error: $error');
+    if (state != VoiceState.listening) return;
     _statusTimer?.cancel();
     switch (error) {
       case 'error_no_match':
       case 'error_speech_timeout':
-        _backToReady(notice: "I didn't catch that. Tap the mic and try again.");
+      case 'no-speech':
+        _backToReady(
+          notice: "I didn't hear anything ($error). Check that the right microphone is selected and "
+              'speak right after tapping the mic, or type it below.',
+        );
+      case 'not-allowed':
+      case 'service-not-allowed':
+      case 'audio-capture':
+        speechProblem = 'The browser cannot use the microphone ($error). Allow the microphone for this site '
+            '(the icon next to the address bar) and check that a microphone is connected, or type what you spent below.';
+        _backToReady(error: speechProblem);
+      case 'error_language_not_supported':
+      case 'error_language_unavailable':
+        _backToReady(
+          error: 'This phone has no offline speech pack for the chosen language ($error). '
+              'Pick another language in the list, or install it in Settings > Language > Voice input.',
+        );
       case 'error_permission':
         speechAvailable = false;
         speechProblem = 'The microphone is blocked. Allow microphone and speech access in '
@@ -291,7 +448,10 @@ class VoiceController extends ChangeNotifier {
     soundLevel.value = 0;
     final text = transcript.trim();
     if (text.isEmpty) {
-      _backToReady(notice: "I didn't catch that. Tap the mic and try again.");
+      _backToReady(
+        notice: "I didn't hear anything. Check the microphone and speak right after tapping the mic, "
+            'or type it below.',
+      );
       return;
     }
     unawaited(_submit(text));
@@ -305,8 +465,14 @@ class VoiceController extends ChangeNotifier {
     if (text.isEmpty || state == VoiceState.sending || state == VoiceState.initializing) return;
     if (state == VoiceState.listening) {
       _statusTimer?.cancel();
+      _maxRecordingTimer?.cancel();
       try {
-        await recognizer.cancel();
+        if (_recording) {
+          _recording = false;
+          await capture!.cancel();
+        } else {
+          await recognizer.cancel();
+        }
       } catch (_) {}
     }
     await _submit(text);
@@ -322,6 +488,25 @@ class VoiceController extends ChangeNotifier {
         clientRequestId: 'req-${now.microsecondsSinceEpoch}',
         userId: userId,
         transcript: text,
+        localeId: selectedLocaleId,
+        sentAt: now,
+        currencyCode: currencyCode,
+        currencySymbol: symbol,
+        categories: categories,
+      )),
+    );
+  }
+
+  Future<void> _submitAudio(Uint8List audio) {
+    return _run(
+      shown: 'Listening to what you said…',
+      source: ExpenseSource.voice,
+      fromAudio: true,
+      call: (now) => workflow.submit(VoiceWorkflowRequest(
+        clientRequestId: 'req-${now.microsecondsSinceEpoch}',
+        userId: userId,
+        transcript: '',
+        audio: audio,
         localeId: selectedLocaleId,
         sentAt: now,
         currencyCode: currencyCode,
@@ -380,6 +565,7 @@ class VoiceController extends ChangeNotifier {
     required ExpenseSource source,
     required Future<VoiceWorkflowResult> Function(DateTime now) call,
     String? receiptId,
+    bool fromAudio = false,
   }) async {
     final token = ++_requestCounter;
     _clearOutput();
@@ -390,7 +576,7 @@ class VoiceController extends ChangeNotifier {
     try {
       final answer = await call(_now());
       if (_disposed || token != _requestCounter) return; // closed or cancelled while waiting
-      final spoken = source == ExpenseSource.voice ? shown : null;
+      final spoken = source != ExpenseSource.voice ? null : (fromAudio ? answer.heard : shown);
       final built = _buildDraft(answer, spoken, source, receiptId);
       if (receiptId != null) _record(vault?.recordResult(receiptId, answer, draft: built));
 
@@ -411,14 +597,14 @@ class VoiceController extends ChangeNotifier {
     } on VoiceWorkflowException catch (error) {
       if (receiptId != null) _record(vault?.markFailed(receiptId, error.message));
       if (_disposed || token != _requestCounter) return;
-      _backToReady(error: error.message, keepTranscript: source == ExpenseSource.voice);
+      _backToReady(error: error.message, keepTranscript: source == ExpenseSource.voice && !fromAudio);
       return;
     } catch (_) {
       if (receiptId != null) _record(vault?.markFailed(receiptId, 'Something went wrong while reading it.'));
       if (_disposed || token != _requestCounter) return;
       _backToReady(
         error: 'Something went wrong while processing that. Please try again.',
-        keepTranscript: source == ExpenseSource.voice,
+        keepTranscript: source == ExpenseSource.voice && !fromAudio,
       );
       return;
     }
@@ -587,6 +773,9 @@ class VoiceController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _statusTimer?.cancel();
+    _maxRecordingTimer?.cancel();
+    final recorder = capture;
+    if (recorder != null) unawaited(recorder.dispose());
     soundLevel.dispose();
     super.dispose();
   }

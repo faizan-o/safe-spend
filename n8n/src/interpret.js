@@ -27,6 +27,11 @@ const conf = Math.min(1, Math.max(0, Number(t.confidence) || 0));
 if (KIND === 'voice') {
   status = ['parsed', 'needs_clarification', 'failed'].includes(t.status) ? t.status : 'failed';
   rupees = Number(t.amount); dateStr = t.date; merchant = cleanText(t.merchant, 100); note = cleanText(t.note, MAX_NOTE); catId = t.categoryId;
+  // Anti-guessing: a merchant or note is kept only if its words were actually said.
+  const said = String(t.heard || a.transcript || '').toLowerCase();
+  const words = (x) => String(x || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2);
+  if (merchant && !words(merchant).some((w) => said.includes(w))) merchant = '';
+  if (note) { note = note.split(/\s+/).slice(0, 4).join(' '); if (!words(note).some((w) => said.includes(w))) note = ''; }
 } else {
   rupees = Number(t.total); dateStr = t.date; merchant = cleanText(t.merchant, 100); note = cleanText(t.note, MAX_NOTE); catId = t.categoryId;
   if (t.documentType === 'not_financial') { status = 'failed'; message = message || 'This does not look like a receipt or a payment.'; }
@@ -35,7 +40,9 @@ if (KIND === 'voice') {
   else status = 'parsed';
   items = (Array.isArray(t.items) ? t.items : []).slice(0, 30).map((i) => ({ description: cleanText(i && i.description, 100), amount: toMinor(i && i.amount), quantity: Math.max(1, Math.round(Number(i && i.quantity) || 1)) })).filter((i) => i.description && Number.isFinite(i.amount) && i.amount > 0);
 }
-if (status !== 'parsed') return respond(200, { status, message: message || 'I need a bit more detail.', confidence: conf });
+const heard = KIND === 'voice' ? (a.transcript || cleanText(t.heard, 1000) || null) : null;
+if (KIND === 'voice' && a.audio && !heard && status === 'parsed') { status = 'needs_clarification'; message = 'I could not hear that clearly. Please try again, a little closer to the microphone.'; }
+if (status !== 'parsed') return respond(200, { status, message: message || 'I need a bit more detail.', confidence: conf, transcript: heard });
 if (!Number.isFinite(rupees) || rupees <= 0 || rupees > maxAmount) return respond(200, { status: 'needs_clarification', message: 'I could not work out a valid amount. How much was it?', confidence: conf });
 
 const { cat, exact } = pickCategory(p.cats, catId);
@@ -56,15 +63,17 @@ const amount = toMinor(rupees);
 const expense = {
   amount, categoryId: cat.id, categoryName: cat.name, categoryKind: cat.kind,
   note: note || merchant || (KIND === 'voice' ? '' : 'Receipt'), date: when.iso,
-  source: KIND === 'voice' ? 'voice' : 'receipt', transcript: KIND === 'voice' ? a.transcript : null,
+  source: KIND === 'voice' ? 'voice' : 'receipt', transcript: KIND === 'voice' ? (a.transcript || cleanText(t.heard, 1000) || null) : null,
   merchant: merchant || null, confidence: Math.round(conf * 100) / 100, requestId: a.requestId, items,
   receiptId: KIND === 'receipt' ? a.receiptId : null, receiptMessage: message,
 };
+// What was heard from a recording is shown to the user to confirm, unless auto-saving it was turned on in Config.
+if (KIND === 'voice' && a.audio && String(cfg.autoSaveAudio).toLowerCase() !== 'true') reasons.push('heard_from_audio');
 const needsReview = reasons.length > 0;
 const shouldSave = a.save && !needsReview;
 const expenseId = expenseIdFor(KIND, a.requestId);
 const response = {
-  workflow: WORKFLOW, saved: false, status: 'parsed', message: message || 'Got it.', confidence: expense.confidence, needsReview, reviewReasons: reasons, expenseId: shouldSave ? expenseId : null, receiptId: KIND === 'receipt' ? a.receiptId : null,
+  workflow: WORKFLOW, transcript: heard, saved: false, status: 'parsed', message: message || 'Got it.', confidence: expense.confidence, needsReview, reviewReasons: reasons, expenseId: shouldSave ? expenseId : null, receiptId: KIND === 'receipt' ? a.receiptId : null,
   expense: { amount: toRupees(amount), categoryId: cat.id, categoryName: cat.name, note: expense.note, merchant: merchant || null, date: when.day, items: items.map((i) => ({ description: i.description, amount: toRupees(i.amount), quantity: i.quantity })) },
 };
 const out = { shouldSave, httpStatus: 200, response, expenseId };

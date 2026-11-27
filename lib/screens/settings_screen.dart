@@ -2,20 +2,29 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../data/sample_data.dart';
+import '../data/user_data.dart';
+import '../models/date_keys.dart';
+import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../settings/theme_controller.dart';
 import '../theme.dart';
+import '../utils/formatters.dart';
 import '../utils/responsive.dart';
+import '../widgets/opening_balance_sheet.dart';
 
-void openSettings(BuildContext context, AuthService auth, AuthUser user) {
+void openSettings(BuildContext context, AuthService auth, AuthUser user, {UserData? data}) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(builder: (_) => SettingsScreen(auth: auth, user: user)),
+    MaterialPageRoute<void>(builder: (_) => SettingsScreen(auth: auth, user: user, data: data)),
   );
 }
 
 /// App settings. Today: the appearance (light, dark or follow the device).
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key, required this.auth, required this.user});
+  const SettingsScreen({super.key, required this.auth, required this.user, this.data});
+
+  /// Needed for the testing tools; null in demo mode.
+  final UserData? data;
 
   final AuthService auth;
   final AuthUser user;
@@ -46,6 +55,11 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
+          if (data != null) ...[
+            const SizedBox(height: 24),
+            _SectionLabel('Money'),
+            _OpeningBalanceCard(data: data!),
+          ],
           const SizedBox(height: 24),
           _SectionLabel('Account'),
           Card(
@@ -70,12 +84,61 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          if (data != null) ...[
+            const SizedBox(height: 24),
+            _SectionLabel('Testing'),
+            _SampleDataCard(data: data!),
+          ],
           const SizedBox(height: 24),
           Center(
             child: Text(AppConfig.appName, style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Shows the opening balance and lets the user change it.
+class _OpeningBalanceCard extends StatelessWidget {
+  const _OpeningBalanceCard({required this.data});
+
+  final UserData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return StreamBuilder<UserProfile?>(
+      stream: data.profile.watchProfile(),
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+        final symbol = profile?.currencySymbol ?? 'Rs.';
+        final has = profile != null && profile.hasOpeningBalance;
+        return Card(
+          elevation: 0,
+          color: scheme.surfaceContainerHighest,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: ListTile(
+            leading: const Icon(Icons.account_balance_wallet_outlined),
+            title: const Text('Opening balance'),
+            subtitle: Text(
+              has
+                  ? '${formatMoney(profile.openingBalance, symbol)} on ${shortDate(DateKeys.parseDay(profile.openingBalanceDay) ?? DateTime.now())}'
+                  : 'Not set. Enter the money you have now.',
+            ),
+            trailing: const Icon(Icons.edit_outlined, size: 18),
+            onTap: profile == null
+                ? null
+                : () => showOpeningBalanceSheet(
+                      context,
+                      data: data,
+                      symbol: symbol,
+                      currentAmount: has ? profile.openingBalance : null,
+                      currentDay: has ? DateKeys.parseDay(profile.openingBalanceDay) : null,
+                    ),
+          ),
+        );
+      },
     );
   }
 }
@@ -117,6 +180,85 @@ class _ThemeOption extends StatelessWidget {
       ),
       selected: selected,
       onTap: () => unawaited(themeController.setMode(mode)),
+    );
+  }
+}
+
+/// Adds a month of realistic expenses so the dashboard, flags and the monthly
+/// report can be tried without typing everything in.
+class _SampleDataCard extends StatefulWidget {
+  const _SampleDataCard({required this.data});
+
+  final UserData data;
+
+  @override
+  State<_SampleDataCard> createState() => _SampleDataCardState();
+}
+
+class _SampleDataCardState extends State<_SampleDataCard> {
+  bool _busy = false;
+  int _done = 0;
+
+  Future<void> _run() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add sample data?'),
+        content: const Text(
+          'This adds about 100 test expenses for last month and this month, and a budget for each '
+          'month that has none. It is meant for trying the app and the monthly report.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _done = 0;
+    });
+    String message;
+    try {
+      final count = await SampleData.load(
+        widget.data,
+        onProgress: (done, total) {
+          if (mounted) setState(() => _done = done);
+        },
+      );
+      message = 'Added $count sample expenses, plus income, bills and a debt and a loan.';
+    } catch (error) {
+      message = 'Could not add the sample data: $error';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerHighest,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        leading: const Icon(Icons.dataset_outlined),
+        title: const Text('Add a month of sample data'),
+        subtitle: Text(_busy ? 'Adding… $_done expenses saved' : 'Test expenses and budgets for last month and this month'),
+        trailing: _busy
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.chevron_right),
+        onTap: _busy ? null : _run,
+      ),
     );
   }
 }

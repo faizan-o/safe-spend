@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../data/user_data.dart';
 import '../models/category.dart';
-import '../models/date_keys.dart';
 import '../models/expense.dart';
 import '../models/money.dart';
 import '../utils/category_icons.dart';
 import '../utils/formatters.dart';
+import 'dashboard/expense_tile.dart';
+import 'form_bits.dart';
 
 /// Opens the bottom sheet for adding an expense, or editing [existing].
 ///
@@ -15,7 +15,11 @@ import '../utils/formatters.dart';
 /// empty id, such as one found by the voice workflow): the sheet then shows it
 /// pre-filled and saves it as a new expense.
 ///
-/// Completes with true when the expense was saved, otherwise null.
+/// Everything can be changed: amount, category, shop, note, date and time, and
+/// for a receipt the lines read from it. [onSaved] gets the expense as saved
+/// (its id is empty for a new one).
+///
+/// Completes with true when the expense was saved or deleted, otherwise null.
 Future<bool?> showExpenseSheet(
   BuildContext context, {
   required UserData data,
@@ -23,18 +27,17 @@ Future<bool?> showExpenseSheet(
   required String symbol,
   Expense? existing,
   void Function(String expenseId)? onAdded,
+  void Function(Expense saved)? onSaved,
 }) {
-  return showModalBottomSheet<bool>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: true,
-    builder: (_) => ExpenseSheet(
+  return showAppSheet<bool>(
+    context,
+    (_) => ExpenseSheet(
       data: data,
       categories: categories,
       symbol: symbol,
       existing: existing,
       onAdded: onAdded,
+      onSaved: onSaved,
     ),
   );
 }
@@ -47,10 +50,14 @@ class ExpenseSheet extends StatefulWidget {
     required this.symbol,
     this.existing,
     this.onAdded,
+    this.onSaved,
   });
 
   /// Called with the new id when the sheet saved a new expense.
   final void Function(String expenseId)? onAdded;
+
+  /// Called with the expense when the sheet saved it (new or edited).
+  final void Function(Expense saved)? onSaved;
 
   final UserData data;
   final List<ExpenseCategory> categories;
@@ -61,16 +68,35 @@ class ExpenseSheet extends StatefulWidget {
   State<ExpenseSheet> createState() => _ExpenseSheetState();
 }
 
-class _ExpenseSheetState extends State<ExpenseSheet> {
-  static const int _maxAmount = 100000000000; // Rs. 1,000,000,000 in paisa
+/// The text fields of one receipt line.
+class _ItemFields {
+  _ItemFields({String description = '', String amount = '', int quantity = 1})
+      : description = TextEditingController(text: description),
+        amount = TextEditingController(text: amount),
+        quantity = TextEditingController(text: quantity.toString());
 
+  final TextEditingController description;
+  final TextEditingController amount;
+  final TextEditingController quantity;
+
+  void dispose() {
+    description.dispose();
+    amount.dispose();
+    quantity.dispose();
+  }
+}
+
+class _ExpenseSheetState extends State<ExpenseSheet> {
   late final TextEditingController _amount = TextEditingController(
     text: widget.existing == null || widget.existing!.amount <= 0 ? '' : amountForField(widget.existing!.amount),
   );
   late final TextEditingController _note =
       TextEditingController(text: widget.existing?.note ?? '');
+  late final TextEditingController _merchant =
+      TextEditingController(text: widget.existing?.merchant ?? '');
   late final List<ExpenseCategory> _categories = _withExistingCategory();
   late DateTime _date = widget.existing?.date ?? DateTime.now();
+  final List<_ItemFields> _items = [];
 
   ExpenseCategory? _selected;
   String? _amountError;
@@ -78,6 +104,11 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
 
   /// True when changing a saved expense; false for a new one or a draft.
   bool get _editing => widget.existing != null && widget.existing!.id.isNotEmpty;
+
+  /// Receipts have lines that can be corrected.
+  bool get _showItems =>
+      widget.existing != null &&
+      (widget.existing!.items.isNotEmpty || widget.existing!.source == ExpenseSource.receipt);
 
   @override
   void initState() {
@@ -87,6 +118,13 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
       for (final category in _categories) {
         if (category.id == existing.categoryId) _selected = category;
       }
+      for (final item in existing.items) {
+        _items.add(_ItemFields(
+          description: item.description,
+          amount: amountForField(item.amount),
+          quantity: item.quantity,
+        ));
+      }
     }
   }
 
@@ -94,6 +132,10 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
   void dispose() {
     _amount.dispose();
     _note.dispose();
+    _merchant.dispose();
+    for (final item in _items) {
+      item.dispose();
+    }
     super.dispose();
   }
 
@@ -114,26 +156,21 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
     return list;
   }
 
-  Future<void> _pickDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _date.isAfter(now) ? now : _date,
-      firstDate: DateTime(now.year - 2),
-      lastDate: now,
-    );
-    if (picked != null) setState(() => _date = picked);
-  }
-
-  /// Keeps the original time when the day did not change; otherwise uses the
-  /// chosen day with the current time of day.
-  DateTime _resolveDate() {
-    final original = widget.existing?.date;
-    if (original != null && DateKeys.ofDay(original) == DateKeys.ofDay(_date)) {
-      return original;
+  /// The lines that are filled in properly (a description and an amount).
+  List<ExpenseItem> _readItems() {
+    final result = <ExpenseItem>[];
+    for (final fields in _items) {
+      final description = fields.description.text.trim();
+      final amount = Money.parse(fields.amount.text);
+      if (description.isEmpty || amount == null || amount <= 0) continue;
+      final quantity = int.tryParse(fields.quantity.text.trim()) ?? 1;
+      result.add(ExpenseItem(
+        description: description,
+        amount: amount,
+        quantity: quantity < 1 ? 1 : quantity,
+      ));
     }
-    final now = DateTime.now();
-    return DateTime(_date.year, _date.month, _date.day, now.hour, now.minute);
+    return result;
   }
 
   void _save() {
@@ -141,7 +178,7 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
     String? amountError;
     if (minor == null || minor <= 0) {
       amountError = 'Enter an amount above zero';
-    } else if (minor > _maxAmount) {
+    } else if (minor > maxAmountMinor) {
       amountError = 'That amount is too large';
     }
     final categoryError = _selected == null ? 'Choose a category' : null;
@@ -154,17 +191,26 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
 
     final category = _selected!;
     final existing = widget.existing;
+    final merchant = _merchant.text.trim();
     // Editing keeps everything the sheet does not show (source, transcript,
-    // merchant, receipt link, ...).
+    // receipt link, ...).
     final expense = existing != null
-        ? existing.copyWith(amount: minor!, category: category, note: _note.text.trim(), date: _resolveDate())
+        ? existing.copyWith(
+            amount: minor!,
+            category: category,
+            note: _note.text.trim(),
+            date: _date,
+            merchant: merchant,
+            items: _showItems ? _readItems() : null,
+          )
         : Expense(
             amount: minor!,
             categoryId: category.id,
             categoryName: category.name,
             categoryKind: category.kind,
             note: _note.text.trim(),
-            date: _resolveDate(),
+            merchant: merchant.isEmpty ? null : merchant,
+            date: _date,
           );
 
     // The write is queued locally at once and confirmed by the server later,
@@ -174,98 +220,192 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
     final Future<void> write = (!_editing || existing == null)
         ? widget.data.expenses.addExpense(expense).then((id) => onAdded?.call(id))
         : widget.data.expenses.updateExpense(previous: existing, updated: expense);
-    write.then((_) {}, onError: (Object error) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not save the expense. Check your connection.')),
-      );
-    });
+    write.then((_) {}, onError: (Object error) => reportSaveError(messenger, 'the expense'));
+    widget.onSaved?.call(expense);
     Navigator.of(context).pop(true);
+  }
+
+  Future<void> _delete() async {
+    final existing = widget.existing;
+    if (existing == null) return;
+    final ok = await confirmAction(
+      context,
+      title: 'Delete this expense?',
+      message: 'It is removed from your totals. You can undo it right after.',
+    );
+    if (!ok || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop(true);
+    deleteExpenseUndoable(messenger, widget.data, existing, widget.symbol);
+  }
+
+  int get _itemsTotal {
+    var total = 0;
+    for (final item in _readItems()) {
+      total += item.amount;
+    }
+    return total;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final keyboard = MediaQuery.of(context).viewInsets.bottom;
-    final now = DateTime.now();
+    final itemsTotal = _itemsTotal;
+    final typedAmount = Money.parse(_amount.text);
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + keyboard),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            _editing ? 'Edit expense' : 'Add expense',
-            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+    return SheetFrame(
+      title: _editing ? 'Edit expense' : 'Add expense',
+      children: [
+        AmountField(
+          controller: _amount,
+          symbol: widget.symbol,
+          autofocus: !_editing,
+          errorText: _amountError,
+          onChanged: (_) => setState(() => _amountError = null),
+        ),
+        const SizedBox(height: 20),
+        Text('Category', style: theme.textTheme.labelLarge),
+        const SizedBox(height: 8),
+        if (_categories.isEmpty)
+          const Text('Categories are still being set up. Close this and try again in a moment.')
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final category in _categories)
+                ChoiceChip(
+                  avatar: Icon(
+                    iconForKey(category.iconKey),
+                    size: 18,
+                    color: Color(category.colorValue),
+                  ),
+                  label: Text(category.name),
+                  selected: _selected?.id == category.id,
+                  onSelected: (_) => setState(() {
+                    _selected = category;
+                    _categoryError = null;
+                  }),
+                ),
+            ],
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _amount,
-            autofocus: !_editing,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
-            textInputAction: TextInputAction.next,
-            style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-            decoration: InputDecoration(
-              labelText: 'Amount',
-              prefixText: '${widget.symbol} ',
-              errorText: _amountError,
+        if (_categoryError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _categoryError!,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
             ),
-            onChanged: (_) {
-              if (_amountError != null) setState(() => _amountError = null);
-            },
           ),
-          const SizedBox(height: 20),
-          Text('Category', style: theme.textTheme.labelLarge),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _merchant,
+          maxLength: 100,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(labelText: 'Shop or payee (optional)'),
+        ),
+        TextField(
+          controller: _note,
+          maxLength: 120,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(labelText: 'Note (optional)'),
+        ),
+        const SizedBox(height: 4),
+        DateTimeFields(value: _date, onChanged: (value) => setState(() => _date = value)),
+        if (_showItems) ...[
+          const SizedBox(height: 24),
+          Text('Items on the receipt', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          if (_categories.isEmpty)
-            const Text('Categories are still being set up. Close this and try again in a moment.')
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          for (var i = 0; i < _items.length; i++) _itemEditor(context, i),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _items.add(_ItemFields())),
+              icon: const Icon(Icons.add),
+              label: const Text('Add item'),
+            ),
+          ),
+          if (itemsTotal > 0)
+            Row(
               children: [
-                for (final category in _categories)
-                  ChoiceChip(
-                    avatar: Icon(
-                      iconForKey(category.iconKey),
-                      size: 18,
-                      color: Color(category.colorValue),
-                    ),
-                    label: Text(category.name),
-                    selected: _selected?.id == category.id,
-                    onSelected: (_) => setState(() {
-                      _selected = category;
-                      _categoryError = null;
+                Expanded(
+                  child: Text(
+                    'Items add up to ${formatMoney(itemsTotal, widget.symbol)}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                if (typedAmount != itemsTotal)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _amount.text = amountForField(itemsTotal);
+                      _amountError = null;
                     }),
+                    child: const Text('Use as total'),
                   ),
               ],
             ),
-          if (_categoryError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                _categoryError!,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-              ),
-            ),
-          const SizedBox(height: 20),
+        ],
+        const SizedBox(height: 20),
+        FilledButton(
+          onPressed: _save,
+          child: Text(_editing ? 'Save changes' : 'Save expense'),
+        ),
+        if (_editing) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+            onPressed: _delete,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete expense'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _itemEditor(BuildContext context, int index) {
+    final fields = _items[index];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           TextField(
-            controller: _note,
-            maxLength: 120,
+            controller: fields.description,
             textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(labelText: 'Note (optional)'),
+            decoration: const InputDecoration(labelText: 'Item', isDense: true),
+            onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 4),
-          OutlinedButton.icon(
-            onPressed: _pickDate,
-            icon: const Icon(Icons.calendar_today_outlined, size: 18),
-            label: Text(dayLabel(_date, now)),
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: _save,
-            child: Text(_editing ? 'Save changes' : 'Save expense'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              SizedBox(
+                width: 72,
+                child: TextField(
+                  controller: fields.quantity,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Qty', isDense: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: fields.amount,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Price', prefixText: '${widget.symbol} ', isDense: true),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Remove item',
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() {
+                  _items.removeAt(index).dispose();
+                }),
+              ),
+            ],
           ),
         ],
       ),

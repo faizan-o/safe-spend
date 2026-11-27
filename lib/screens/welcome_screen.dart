@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/app_logo.dart';
+
 import '../services/auth_service.dart';
 import '../theme.dart';
 import '../widgets/auth_widgets.dart';
@@ -20,19 +22,7 @@ class WelcomeScreen extends StatelessWidget {
       children: [
         const SizedBox(height: 24),
         Center(
-          child: Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Icon(
-              Icons.account_balance_wallet_rounded,
-              size: 44,
-              color: scheme.onPrimaryContainer,
-            ),
-          ),
+          child: const AppLogo(size: 104, badge: true),
         ),
         const SizedBox(height: 24),
         Text(

@@ -180,7 +180,7 @@ function geminiBody({ system, parts, schema, maxTokens, vision }) {
   if (vision) generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
   // Less thinking = much faster answers. Config field thinkingLevel: minimal | low | medium | high, or default to leave it to the model.
   let level = 'low';
-  try { const c = cfgOf().thinkingLevel; if (c !== undefined && c !== null && String(c).trim() !== '') level = String(c).trim().toLowerCase(); } catch (e) { /* keep low */ }
+  try { const c = cfgOf()[levelKey || 'thinkingLevel']; if (c !== undefined && c !== null && String(c).trim() !== '') level = String(c).trim().toLowerCase(); } catch (e) { /* keep low */ }
   if (level !== 'default') generationConfig.thinkingConfig = { thinkingLevel: level };
   return {
     systemInstruction: { parts: [{ text: system }] },

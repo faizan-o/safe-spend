@@ -5,10 +5,13 @@ import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import 'budget_repository.dart';
 import 'category_repository.dart';
+import 'debt_repository.dart';
 import 'expense_repository.dart';
 import 'firestore_paths.dart';
+import 'income_repository.dart';
 import 'insight_repository.dart';
 import 'receipt_repository.dart';
+import 'recurring_repository.dart';
 import 'summary_repository.dart';
 import 'user_repository.dart';
 
@@ -43,6 +46,12 @@ class UserData {
       userDoc.collection(FirestorePaths.insights);
   late final CollectionReference<Map<String, dynamic>> _receiptsCol =
       userDoc.collection(FirestorePaths.receipts);
+  late final CollectionReference<Map<String, dynamic>> _incomesCol =
+      userDoc.collection(FirestorePaths.incomes);
+  late final CollectionReference<Map<String, dynamic>> _recurringCol =
+      userDoc.collection(FirestorePaths.recurring);
+  late final CollectionReference<Map<String, dynamic>> _debtsCol =
+      userDoc.collection(FirestorePaths.debts);
 
   late final UserRepository profile = UserRepository(userDoc);
   late final CategoryRepository categories =
@@ -50,6 +59,11 @@ class UserData {
   late final BudgetRepository budgets = BudgetRepository(_budgetsCol);
   late final ExpenseRepository expenses =
       ExpenseRepository(firestore, _expensesCol, _statsCol);
+  late final IncomeRepository incomes =
+      IncomeRepository(firestore, _incomesCol, _statsCol);
+  late final RecurringRepository recurring =
+      RecurringRepository(firestore, _recurringCol, expenses, incomes);
+  late final DebtRepository debts = DebtRepository(_debtsCol);
   late final SummaryRepository summaries = SummaryRepository(_summariesCol);
   late final InsightRepository insights = InsightRepository(_insightsCol);
   late final CollectionReference<Map<String, dynamic>> _receiptImagesCol =
@@ -88,7 +102,7 @@ class UserData {
     await batch.commit();
   }
 
-  /// Deletes every document stored for this user (expenses, budgets,
+  /// Deletes every document stored for this user (expenses, income, bills, debts, budgets,
   /// categories, stats, summaries, insights, receipts with their pictures, and
   /// the profile). Needed for the
   /// in-app "delete my account" option that the app stores require. Deleting
@@ -99,6 +113,9 @@ class UserData {
       _receiptsCol,
       _receiptImagesCol,
       _expensesCol,
+      _incomesCol,
+      _recurringCol,
+      _debtsCol,
       _statsCol,
       _budgetsCol,
       _summariesCol,

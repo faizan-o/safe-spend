@@ -7,8 +7,11 @@ Cloud Firestore, with everything stored under the signed-in user's own document.
 ```
 users/{uid}                      profile and settings              UserProfile
   categories/{categoryId}        spending categories               ExpenseCategory
-  budgets/{monthKey}             budget declared for a month       MonthlyBudget
+  budgets/{budgetId}             a budget for any period           MonthlyBudget
   expenses/{expenseId}           individual expenses               Expense
+  incomes/{incomeId}             money received                    Income
+  recurring/{recurringId}        bills, rent, fees, expected pay   RecurringItem
+  debts/{debtId}                 money I owe / money I lent        Debt
   monthStats/{monthKey}          running totals for a month        MonthStats
   monthSummaries/{monthKey}      generated month-end report        MonthSummary
   insights/{dayKey}              daily reminder suggestion         DailyInsight
@@ -25,6 +28,12 @@ Receipt pictures are compressed JPEGs in Firestore at `users/{uid}/receiptImages
 | Feature | Where |
 | --- | --- |
 | Categorized budget declared at the start of the month | `budgets/{monthKey}`: income plus a list of category limits |
+| Opening balance | `users/{uid}.openingBalance` and `openingBalanceDay` (the day it is true for) |
+| Budget for a week, month, year or custom dates | `budgets/{budgetId}`: `periodType`, `startDay`, `endDay`, `income` (the money budgeted), category limits. Old documents without dates mean the calendar month of `monthKey` (the id is the month key for those) |
+| Income | `incomes/{incomeId}`; totals kept in `monthStats` (`totalIncome`, `incomeByDay`) in the same atomic batch |
+| Bills, rent, fees with due dates | `recurring/{id}`: `frequency`, `interval`, `nextDueDay`, `endDay`, `remindDays`, `autoRecord`. Paying one writes an `expenses`/`incomes` document with `recurringId` and a deterministic id (`rec_{id}_{dueDay}`), so a due date can never be recorded twice |
+| Debts and loans | `debts/{id}`: `direction` (`owedByMe` / `owedToMe`), `person`, `amount`, `dueDay`, `payments[]`, `affectsBalance` |
+| Current balance | not stored: `openingBalance + income - spending +/- debt movements`, worked out on the device from `monthStats` and `debts` |
 | Daily budget tracker (safe to spend today) | worked out from `budgets` and `monthStats`: `(flexiblePool - flexibleSpent) / days left` |
 | Speech-to-text entry | an `expenses` document with `source: voice` and the original `transcript` |
 | Receipt photo | a `receiptImages` document, a `receipts` record (status, time, what was read) and an `expenses` document with `source: receipt`, `receiptId`, `merchant` and `items` |
@@ -118,3 +127,13 @@ prevents duplicates) and `items` (receipt lines). The security rules need no cha
 
 **Setup:** nothing beyond `firebase deploy --only firestore` (the rules now include `receiptImages`). No Storage bucket or Blaze plan is needed.
 Pictures that cannot be shrunk under the limit (for example a PDF) are still read by the workflow but are not kept.
+
+## Balance, periods and recurring items
+
+- All money is whole minor units (paisa). Day keys are `yyyy-MM-dd`, month keys `yyyy-MM`.
+- The balance counts only what happened from `openingBalanceDay` on. For that day's month the per-day totals in `monthStats` are used.
+- A budget's period is both ends included (a week is Monday to Sunday). Spending for the budget is read from `expenses` by `dayKey` range, so any period works; a yearly budget therefore reads that year's expenses.
+- Several budgets can cover today at once (for example a monthly and a weekly one); the dashboard shows one and offers chips to switch.
+- Recurring items with **Record it automatically** are recorded when the app opens or resumes, including dates missed while it was closed (up to 60 per item). There are no push notifications: due dates are shown in the app (Bills tab and dashboard).
+- Editing an expense or income updates its month totals atomically (old amounts out, new in), also when the date moves to another month.
+- The monthly report (n8n) is built from `monthStats` and the budget of that calendar month, so it exists for calendar-month budgets only. Income is shown in the app but is not read by the n8n workflows; voice and receipt entry create expenses only.

@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../models/category.dart';
 import '../models/date_keys.dart';
 
@@ -13,7 +16,12 @@ class VoiceWorkflowRequest {
     required this.currencyCode,
     required this.currencySymbol,
     required this.categories,
+    this.audio,
   });
+
+  /// A recording (WAV) of what the user said, sent instead of text so the
+  /// workflow can listen to it. When set, [transcript] is empty.
+  final Uint8List? audio;
 
   /// Unique per request, so the workflow can ignore a repeated delivery.
   final String clientRequestId;
@@ -37,6 +45,7 @@ class VoiceWorkflowRequest {
         'clientRequestId': clientRequestId,
         'userId': userId,
         'source': 'voice',
+        if (audio != null) ...{'audioBase64': base64Encode(audio!), 'audioMimeType': 'audio/wav'},
         'transcript': transcript,
         'locale': localeId,
         'sentAt': sentAt.toUtc().toIso8601String(),
@@ -115,7 +124,11 @@ class VoiceWorkflowResult {
     this.needsReview = false,
     this.reviewReasons = const [],
     this.expenseId,
+    this.heard,
   });
+
+  /// What the workflow heard, when it listened to a recording.
+  final String? heard;
 
   /// The id of the expense the workflow saved (when [saved]).
   final String? expenseId;
@@ -201,6 +214,7 @@ class VoiceWorkflowResult {
       confidence: _asDouble(json['confidence']),
       workflow: _asString(json['workflow']),
       expenseId: _asString(json['expenseId']),
+      heard: _asString(json['transcript']),
       saved: json['saved'] == true,
       duplicate: json['duplicate'] == true,
       needsReview: json['needsReview'] == true,

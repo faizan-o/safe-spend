@@ -2,16 +2,22 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/app_logo.dart';
+
 import '../data/user_data.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
 import '../utils/responsive.dart';
+import '../logic/dashboard_controller.dart';
+import 'bills_screen.dart';
 import 'dashboard_screen.dart';
+import 'debts_screen.dart';
 import 'receipts_screen.dart';
 import 'settings_screen.dart';
 import 'voice_screen.dart';
 
-/// The signed-in app: three tabs, Voice (the first screen), Dashboard and Receipts.
+/// The signed-in app: five tabs, Voice (the first screen), Dashboard, Bills,
+/// Debts and Receipts. One shared controller feeds Dashboard, Bills and Debts.
 /// All stay alive when switching, so nothing reloads or is lost.
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -29,13 +35,44 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   static const int _voiceTab = 0;
   static const int _dashboardTab = 1;
+  static const int _billsTab = 2;
 
   final GlobalKey<VoiceScreenState> _voiceKey = GlobalKey<VoiceScreenState>();
 
+  late final DashboardController _controller = DashboardController(widget.data);
+
   int _index = _voiceTab;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _recordDueItems();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// When the app comes back (maybe the next day), move to today's budget and
+  /// record any automatic bills that have come due.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _controller.refreshToday();
+    _recordDueItems();
+  }
+
+  /// Bills set to "record automatically" are added once their date arrives.
+  void _recordDueItems() {
+    widget.data.recurring.recordDue().then((_) {}, onError: (Object _) {});
+  }
 
   void _go(int index) {
     if (index == _index) return;
@@ -70,8 +107,12 @@ class _MainShellState extends State<MainShell> {
           auth: widget.auth,
           user: widget.user,
           data: widget.data,
+          controller: _controller,
           onOpenVoice: wide ? null : () => _go(_voiceTab),
+          onOpenBills: () => _go(_billsTab),
         ),
+        BillsScreen(controller: _controller, data: widget.data),
+        DebtsScreen(controller: _controller, data: widget.data),
         ReceiptsScreen(data: widget.data, onScan: _scan),
       ],
     );
@@ -86,6 +127,8 @@ class _MainShellState extends State<MainShell> {
           destinations: const [
             NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Voice'),
             NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Dashboard'),
+            NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Bills'),
+            NavigationDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: 'Debts'),
             NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Receipts'),
           ],
         ),
@@ -116,7 +159,7 @@ class _MainShellState extends State<MainShell> {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.savings_outlined, color: theme.colorScheme.primary, size: 28),
+                    const AppLogo(size: 34),
                     if (extended) ...[
                       const SizedBox(width: 10),
                       Text(AppConfig.appName, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
@@ -136,7 +179,7 @@ class _MainShellState extends State<MainShell> {
                           icon: Icons.settings_outlined,
                           label: 'Settings',
                           extended: extended,
-                          onTap: () => openSettings(context, widget.auth, widget.user),
+                          onTap: () => openSettings(context, widget.auth, widget.user, data: widget.data),
                         ),
                         _RailAction(
                           icon: Icons.logout,
@@ -152,6 +195,8 @@ class _MainShellState extends State<MainShell> {
               destinations: const [
                 NavigationRailDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: Text('Voice')),
                 NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Dashboard')),
+                NavigationRailDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: Text('Bills')),
+                NavigationRailDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: Text('Debts')),
                 NavigationRailDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: Text('Receipts')),
               ],
             ),

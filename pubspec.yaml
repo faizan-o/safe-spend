@@ -15,6 +15,7 @@ dependencies:
   speech_to_text: ^7.0.0
   http: ^1.2.2
   image_picker: ^1.1.2
+  record: ^6.0.0
   image: ^4.2.0
   shared_preferences: ^2.3.3
   crypto: ^3.0.6
@@ -23,6 +24,30 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: assets/logo/app_icon.png
+  adaptive_icon_background: "#00040F"
+  adaptive_icon_foreground: assets/logo/adaptive_foreground.png
+  web:
+    generate: true
+    image_path: assets/logo/app_icon_rounded.png
+    background_color: "#00040F"
+    theme_color: "#00040F"
+  windows:
+    generate: true
+    image_path: assets/logo/app_icon.png
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: assets/logo/app_icon.png
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/logo/logo_mark.png
+    - assets/logo/logo_badge.png

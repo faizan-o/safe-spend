@@ -1,7 +1,9 @@
 # SafeSpend
 
 Monthly finance manager that shows one daily safe-to-spend number.
-Voice and receipt expense entry, a safe-to-spend dashboard, and AI month-end reports. Sign-in uses Firebase; the AI parts run in n8n with Gemini.
+Voice and receipt expense entry, a safe-to-spend dashboard, and AI month-end reports.
+
+Features: opening balance and a live balance; budgets for a week, month, year or custom dates (several at once); income as well as expenses; bills, rent and fees with due dates, reminders and optional automatic recording; debts and loans with repayments and due dates; and editing of every expense, income, receipt and its items. Sign-in uses Firebase; the AI parts run in n8n with Gemini.
 
 ## Run it
 
@@ -73,11 +75,11 @@ lib/
   report/report_client.dart       asks n8n to (re)build a month report
   screens/
     auth_gate / welcome / sign_in / sign_up / forgot_password
-    main_shell.dart               tabs: Voice (default), Dashboard, Receipts
+    main_shell.dart               tabs: Voice (default), Dashboard, Bills, Debts, Receipts
     receipts_screen.dart          timestamped receipts and receipt detail
     voice_screen.dart             speak, type or scan a receipt
     dashboard_screen.dart         safe-to-spend, flags, progress, expenses
-    budget_setup_screen / expenses_screen / report_screen
+    budget_setup / budgets / transactions / bills / debts / report screens
   widgets/                        shared UI
 n8n/                              importable workflows, schema, README, local tests
 docs/                             database.md, voice-n8n.md

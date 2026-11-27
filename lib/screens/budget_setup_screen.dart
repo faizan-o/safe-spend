@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/user_data.dart';
+import '../models/budget_period.dart';
 import '../models/category.dart';
 import '../models/date_keys.dart';
 import '../models/money.dart';
@@ -9,26 +10,31 @@ import '../models/monthly_budget.dart';
 import '../utils/category_icons.dart';
 import '../utils/formatters.dart';
 import '../utils/responsive.dart';
+import '../widgets/form_bits.dart';
 
-/// Where the user declares the month's budget: income, fixed bills, a savings
-/// goal and a limit for each everyday category.
+/// Where the user sets up a budget: how long it lasts (a week, a month, a
+/// year or any dates), the money to budget (it can be taken from the current
+/// balance), a savings goal and a limit for each category.
 class BudgetSetupScreen extends StatefulWidget {
   const BudgetSetupScreen({
     super.key,
     required this.data,
-    required this.monthKey,
     required this.categories,
     required this.symbol,
     this.initial,
+    this.balance,
   });
 
   final UserData data;
-  final String monthKey;
   final List<ExpenseCategory> categories;
   final String symbol;
 
-  /// The existing budget when editing, or null for a new month.
+  /// The existing budget when editing, or null for a new one.
   final MonthlyBudget? initial;
+
+  /// The user's balance right now, when they have set an opening balance.
+  /// The budget amount can be taken from it.
+  final int? balance;
 
   @override
   State<BudgetSetupScreen> createState() => _BudgetSetupScreenState();
@@ -38,12 +44,22 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
   late final TextEditingController _income = TextEditingController(
     text: (widget.initial?.income ?? 0) > 0 ? amountForField(widget.initial!.income) : '',
   );
+  late final TextEditingController _title = TextEditingController(text: widget.initial?.title ?? '');
   late final Map<String, TextEditingController> _limits = {
     for (final category in widget.categories)
       category.id: TextEditingController(text: _initialLimit(category.id)),
   };
 
+  late PeriodType _type = widget.initial?.periodType ?? PeriodType.monthly;
+  late DateTime _start = widget.initial?.startDate ??
+      BudgetPeriod.defaultStart(PeriodType.monthly, DateTime.now());
+  late DateTime _end = widget.initial?.endDate ??
+      BudgetPeriod.endFor(PeriodType.monthly, BudgetPeriod.defaultStart(PeriodType.monthly, DateTime.now()));
+
   String? _incomeError;
+  bool _saving = false;
+
+  bool get _editing => widget.initial != null;
 
   String _initialLimit(String categoryId) {
     final limit = widget.initial?.forCategory(categoryId)?.limit ?? 0;
@@ -53,6 +69,7 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
   @override
   void dispose() {
     _income.dispose();
+    _title.dispose();
     for (final controller in _limits.values) {
       controller.dispose();
     }
@@ -69,18 +86,85 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
     return total;
   }
 
-  void _save() {
+  /// Picks a preset length. Week, month and year line the dates up with the
+  /// period that contains the current start date; custom keeps the dates.
+  void _setType(PeriodType type) {
+    setState(() {
+      _type = type;
+      if (type != PeriodType.custom) {
+        _start = BudgetPeriod.defaultStart(type, _start);
+        _end = BudgetPeriod.endFor(type, _start);
+      }
+    });
+  }
+
+  void _setStart(DateTime day) {
+    setState(() {
+      _start = DateKeys.startOfDay(day);
+      if (_type == PeriodType.custom) {
+        if (_end.isBefore(_start)) _end = _start;
+      } else {
+        _end = BudgetPeriod.endFor(_type, _start);
+      }
+    });
+  }
+
+  /// Choosing an end date by hand makes the budget custom.
+  void _setEnd(DateTime day) {
+    setState(() {
+      _end = DateKeys.startOfDay(day);
+      if (_end != BudgetPeriod.endFor(_type, _start)) _type = PeriodType.custom;
+    });
+  }
+
+  Future<void> _save() async {
     final income = _amountOf(_income);
     if (income <= 0) {
-      setState(() => _incomeError = 'Enter your income for the month');
+      setState(() => _incomeError = 'Enter the money you want to budget');
+      return;
+    }
+    if (_end.isBefore(_start)) {
+      showMessage(context, 'The end date is before the start date.');
       return;
     }
     final pool = income - _sumOf(CategoryKind.fixed) - _sumOf(CategoryKind.savings);
     if (pool < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Fixed bills and savings are more than your income.')),
-      );
+      showMessage(context, 'Fixed bills and savings are more than the money you are budgeting.');
       return;
+    }
+
+    final balance = widget.balance;
+    if (balance != null && income > balance) {
+      final go = await confirmAction(
+        context,
+        title: 'More than your balance',
+        message: 'You are budgeting ${formatMoney(income, widget.symbol)} but your balance is '
+            '${formatMoney(balance, widget.symbol)}. Continue anyway? (That is fine if you expect '
+            'income during this budget.)',
+        confirmLabel: 'Continue',
+      );
+      if (!go || !mounted) return;
+    }
+
+    final period = BudgetPeriod(type: _type, start: _start, end: _end);
+    final id = widget.initial?.id ?? widget.data.budgets.newIdFor(period);
+
+    // A new calendar-month budget uses the month key as its id; do not
+    // silently replace one that already exists.
+    if (!_editing && period.isCalendarMonth) {
+      setState(() => _saving = true);
+      final existing = await widget.data.budgets.getBudget(id);
+      if (!mounted) return;
+      setState(() => _saving = false);
+      if (existing != null) {
+        final replace = await confirmAction(
+          context,
+          title: 'Replace this month\'s budget?',
+          message: 'You already have a budget for ${monthTitle(id)}. Saving replaces it.',
+          confirmLabel: 'Replace',
+        );
+        if (!replace || !mounted) return;
+      }
     }
 
     final lines = <CategoryBudget>[
@@ -95,21 +179,24 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
         const <CategoryBudget>[];
 
     final budget = MonthlyBudget(
-      monthKey: widget.monthKey,
+      id: id,
+      monthKey: DateKeys.ofMonth(_start),
       income: income,
       categories: [...lines, ...carried],
+      title: _title.text.trim(),
+      periodType: _type,
+      startDay: period.startDay,
+      endDay: period.endDay,
     );
 
     // Saved on the device at once and confirmed by the server later, so close
     // the screen now instead of waiting (the device may be offline).
     final messenger = ScaffoldMessenger.of(context);
-    widget.data.budgets.saveBudget(budget).then((_) {}, onError: (Object error) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not save the budget. Check your connection.')),
-      );
-    });
+    widget.data.budgets
+        .saveBudget(budget)
+        .then((_) {}, onError: (Object error) => reportSaveError(messenger, 'the budget'));
     widget.data.profile.markOnboardingComplete().then((_) {}, onError: (Object _) {});
-    Navigator.of(context).pop();
+    Navigator.of(context).pop(true);
   }
 
   @override
@@ -121,23 +208,103 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
     final income = _amountOf(_income);
     final pool = income - _sumOf(CategoryKind.fixed) - _sumOf(CategoryKind.savings);
     final unassigned = pool - _sumOf(CategoryKind.flexible);
-    final perDay = pool > 0 ? pool ~/ DateKeys.daysInMonth(widget.monthKey) : 0;
+    final days = BudgetPeriod(type: _type, start: _start, end: _end).totalDays;
+    final perDay = (pool > 0 && !_end.isBefore(_start)) ? pool ~/ days : 0;
+    final balance = widget.balance;
 
     String money(int minor) => Money.format(minor, symbol: symbol);
 
     return Scaffold(
-      appBar: AppBar(title: Text('Budget for ${monthTitle(widget.monthKey)}')),
+      appBar: AppBar(title: Text(_editing ? 'Edit budget' : 'New budget')),
       body: ListView(
         padding: Responsive.listPadding(context, maxWidth: 640, side: 20, top: 8),
         children: [
+          Text('How long', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          SegmentedButton<PeriodType>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: PeriodType.weekly, label: Text('Week')),
+              ButtonSegment(value: PeriodType.monthly, label: Text('Month')),
+              ButtonSegment(value: PeriodType.yearly, label: Text('Year')),
+              ButtonSegment(value: PeriodType.custom, label: Text('Custom')),
+            ],
+            selected: {_type},
+            onSelectionChanged: (selection) => _setType(selection.first),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: DayButton(
+                  label: 'Starts',
+                  value: _start,
+                  firstDate: DateTime(DateTime.now().year - 2),
+                  lastDate: DateTime(DateTime.now().year + 3),
+                  onChanged: _setStart,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: DayButton(
+                  label: 'Ends',
+                  value: _end,
+                  firstDate: _start,
+                  lastDate: DateTime(_start.year + 10),
+                  onChanged: _setEnd,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _end.isBefore(_start)
+                ? 'The end date is before the start date.'
+                : '${plural(days, 'day')} · ${periodLabel(_start, _end)}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: _end.isBefore(_start) ? scheme.error : scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _title,
+            maxLength: 40,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Name (optional)',
+              hintText: 'For example Eid week',
+              prefixIcon: Icon(Icons.label_outline),
+            ),
+          ),
+          const SizedBox(height: 8),
           _MoneyField(
             controller: _income,
-            label: 'Income this month',
+            label: 'Money to budget',
             symbol: symbol,
             icon: Icons.payments_outlined,
             errorText: _incomeError,
             onChanged: (_) => setState(() => _incomeError = null),
           ),
+          const SizedBox(height: 8),
+          if (balance != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ActionChip(
+                avatar: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+                label: Text('Use my balance: ${money(balance)}'),
+                onPressed: balance <= 0
+                    ? null
+                    : () => setState(() {
+                          _income.text = amountForField(balance);
+                          _incomeError = null;
+                        }),
+              ),
+            )
+          else
+            Text(
+              'Tip: set your opening balance on the dashboard to budget against what you have.',
+              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
           const SizedBox(height: 16),
           Card(
             elevation: 0,
@@ -156,8 +323,8 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
                   const SizedBox(height: 4),
                   Text(
                     pool < 0
-                        ? 'Fixed bills and savings are more than your income.'
-                        : 'Income minus fixed bills and savings. About ${money(perDay)} a day.',
+                        ? 'Fixed bills and savings are more than the money you are budgeting.'
+                        : 'The budget minus fixed bills and savings. About ${money(perDay)} a day.',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
@@ -175,14 +342,17 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
             ),
           ),
           _section(context, 'Fixed bills', 'Set aside first: rent, bills, committee.', CategoryKind.fixed),
-          _section(context, 'Savings goal', 'What you want to keep this month.', CategoryKind.savings),
+          _section(context, 'Savings goal', 'What you want to keep during this budget.', CategoryKind.savings),
           _section(context, 'Everyday spending', 'A limit for each kind of daily spending.', CategoryKind.flexible),
         ],
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-          child: FilledButton(onPressed: _save, child: const Text('Save budget')),
+          child: FilledButton(
+            onPressed: _saving ? null : _save,
+            child: Text(_editing ? 'Save budget' : 'Create budget'),
+          ),
         ),
       ),
     );

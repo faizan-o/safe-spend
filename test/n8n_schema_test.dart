@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:safespend/models/budget_period.dart';
+import 'package:safespend/models/debt.dart';
+import 'package:safespend/models/recurring.dart';
 import 'package:safespend/models/category.dart';
 import 'package:safespend/models/expense.dart';
 import 'package:safespend/models/month_summary.dart';
@@ -19,6 +22,10 @@ void main() {
     expect(enums['ExpenseSource'], ExpenseSource.values.map((e) => e.name).toList());
     expect(enums['FlagType'], FlagType.values.map((e) => e.name).toList());
     expect(enums['ReceiptStatus'], ReceiptStatus.values.map((e) => e.name).toList());
+    expect(enums['PeriodType'], PeriodType.values.map((e) => e.name).toList());
+    expect(enums['RecurringType'], RecurringType.values.map((e) => e.name).toList());
+    expect(enums['Frequency'], Frequency.values.map((e) => e.name).toList());
+    expect(enums['DebtDirection'], DebtDirection.values.map((e) => e.name).toList());
   });
 
   test('default categories match', () {

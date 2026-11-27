@@ -3,85 +3,73 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/user_data.dart';
+import '../logic/balance_calculator.dart';
 import '../logic/dashboard_controller.dart';
 import '../models/date_keys.dart';
 import '../models/expense.dart';
+import '../models/income.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
+import '../widgets/dashboard/balance_card.dart';
 import '../widgets/dashboard/category_progress_list.dart';
 import '../widgets/dashboard/expense_tile.dart';
 import '../widgets/dashboard/flags_section.dart';
+import '../widgets/dashboard/income_tile.dart';
 import '../widgets/dashboard/month_overview_card.dart';
 import '../widgets/dashboard/safe_to_spend_card.dart';
+import '../widgets/dashboard/upcoming_dues_card.dart';
 import '../widgets/expense_sheet.dart';
+import '../widgets/form_bits.dart';
+import '../widgets/income_sheet.dart';
+import '../widgets/opening_balance_sheet.dart';
+import 'bills_screen.dart';
 import 'budget_setup_screen.dart';
-import 'expenses_screen.dart';
+import 'budgets_screen.dart';
 import 'report_screen.dart';
 import 'settings_screen.dart';
-import '../utils/responsive.dart';
+import 'transactions_screen.dart';
 
-enum _MenuAction { editBudget, allExpenses, report, settings, signOut }
+enum _MenuAction { budgets, transactions, report, settings, signOut }
 
-/// The main screen: today's safe-to-spend number, the month at a glance, red
-/// and green flags, category progress and recent expenses.
+/// The main screen: the balance, today's safe-to-spend number, the budget at a
+/// glance, what is due soon, red and green flags, category progress and recent
+/// activity (expenses and income).
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     super.key,
     required this.auth,
     required this.user,
     required this.data,
+    required this.controller,
     this.onOpenVoice,
+    this.onOpenBills,
   });
 
   final AuthService auth;
   final AuthUser user;
   final UserData data;
 
+  /// Shared with the other tabs; owned (and disposed) by the shell.
+  final DashboardController controller;
+
   /// Opens the voice input screen. When given, a microphone button is shown.
   final VoidCallback? onOpenVoice;
+
+  /// Opens the Bills tab ("See all" on the coming-up card).
+  final VoidCallback? onOpenBills;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
-  late DashboardController _controller = _createController();
-  bool _copying = false;
+class _DashboardScreenState extends State<DashboardScreen> {
+  bool _repeating = false;
 
-  DashboardController _createController() {
-    return DashboardController(widget.data, DateKeys.ofMonth(DateTime.now()));
-  }
+  DashboardController get _controller => widget.controller;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _controller.dispose();
-    super.dispose();
-  }
-
-  /// When the app comes back after midnight on the last day of a month, start
-  /// showing the new month.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-    if (_controller.monthKey == DateKeys.ofMonth(DateTime.now())) return;
-    final old = _controller;
-    setState(() => _controller = _createController());
-    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
-  }
-
-  void _message(String text) {
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(text)));
-  }
+  void _message(String text) => showMessage(context, text);
 
   void _addExpense() {
     final c = _controller;
@@ -90,6 +78,40 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       return;
     }
     showExpenseSheet(context, data: widget.data, categories: c.categories, symbol: c.symbol);
+  }
+
+  void _addIncome() {
+    showIncomeSheet(context, data: widget.data, symbol: _controller.symbol);
+  }
+
+  void _addMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.north_east),
+              title: const Text('Add expense'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _addExpense();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.south_west),
+              title: const Text('Add income'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _addIncome();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _editExpense(Expense expense) {
@@ -103,6 +125,21 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
+  void _editIncome(Income income) {
+    showIncomeSheet(context, data: widget.data, symbol: _controller.symbol, existing: income);
+  }
+
+  void _setOpeningBalance() {
+    final profile = _controller.profile;
+    showOpeningBalanceSheet(
+      context,
+      data: widget.data,
+      symbol: _controller.symbol,
+      currentAmount: profile?.hasOpeningBalance == true ? profile!.openingBalance : null,
+      currentDay: profile?.hasOpeningBalance == true ? DateKeys.parseDay(profile!.openingBalanceDay) : null,
+    );
+  }
+
   void _openBudgetSetup() {
     final c = _controller;
     if (c.categories.isEmpty) {
@@ -113,19 +150,45 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       MaterialPageRoute<void>(
         builder: (_) => BudgetSetupScreen(
           data: widget.data,
-          monthKey: c.monthKey,
           categories: c.categories,
           symbol: c.symbol,
-          initial: c.budget,
+          initial: null,
+          balance: c.balance?.balance,
         ),
       ),
     );
   }
 
-  void _openAllExpenses() {
+  void _editCurrentBudget() {
+    final c = _controller;
+    final budget = c.budget;
+    if (budget == null || c.categories.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ExpensesScreen(controller: _controller, data: widget.data),
+        builder: (_) => BudgetSetupScreen(
+          data: widget.data,
+          categories: c.categories,
+          symbol: c.symbol,
+          initial: budget,
+          balance: c.balance?.balance,
+        ),
+      ),
+    );
+  }
+
+  void _openBudgets() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BudgetsScreen(controller: _controller, data: widget.data),
+      ),
+    );
+  }
+
+  void _openTransactions() {
+    final c = _controller;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TransactionsScreen(data: widget.data, categories: c.categories, symbol: c.symbol),
       ),
     );
   }
@@ -143,24 +206,33 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  Future<void> _copyLastMonth() async {
-    final c = _controller;
-    setState(() => _copying = true);
+  void _openBills() {
+    final open = widget.onOpenBills;
+    if (open != null) {
+      open();
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BillsScreen(controller: _controller, data: widget.data),
+      ),
+    );
+  }
+
+  Future<void> _repeatLast() async {
+    setState(() => _repeating = true);
     try {
-      final copied = await widget.data.budgets
-          .copyFromMonth(
-            fromMonthKey: DateKeys.previousMonth(c.monthKey),
-            toMonthKey: c.monthKey,
-          )
+      final repeated = await widget.data.budgets
+          .repeatLatest()
           // Offline, the save is kept on the device and confirmed later.
           .timeout(const Duration(seconds: 8), onTimeout: () => null);
-      if (copied == null && mounted && c.budget == null) {
-        _message('There is no budget from last month to copy. Set one up instead.');
+      if (repeated == null && mounted && _controller.budget == null) {
+        _message('There is no earlier budget to repeat. Set one up instead.');
       }
     } catch (_) {
-      if (mounted) _message('Could not copy last month. Check your connection.');
+      if (mounted) _message('Could not repeat the budget. Check your connection.');
     } finally {
-      if (mounted) setState(() => _copying = false);
+      if (mounted) setState(() => _repeating = false);
     }
   }
 
@@ -182,21 +254,21 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 tooltip: 'Menu',
                 onSelected: (action) {
                   switch (action) {
-                    case _MenuAction.editBudget:
-                      _openBudgetSetup();
-                    case _MenuAction.allExpenses:
-                      _openAllExpenses();
+                    case _MenuAction.budgets:
+                      _openBudgets();
+                    case _MenuAction.transactions:
+                      _openTransactions();
                     case _MenuAction.report:
                       _openReport();
                     case _MenuAction.settings:
-                      openSettings(context, widget.auth, widget.user);
+                      openSettings(context, widget.auth, widget.user, data: widget.data);
                     case _MenuAction.signOut:
                       unawaited(_signOut());
                   }
                 },
                 itemBuilder: (_) => const [
-                  PopupMenuItem(value: _MenuAction.editBudget, child: Text('Edit budget')),
-                  PopupMenuItem(value: _MenuAction.allExpenses, child: Text('All expenses')),
+                  PopupMenuItem(value: _MenuAction.budgets, child: Text('Budgets')),
+                  PopupMenuItem(value: _MenuAction.transactions, child: Text('All transactions')),
                   PopupMenuItem(value: _MenuAction.report, child: Text('Monthly report')),
                   PopupMenuItem(value: _MenuAction.settings, child: Text('Settings')),
                   PopupMenuItem(value: _MenuAction.signOut, child: Text('Sign out')),
@@ -221,9 +293,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ],
                     FloatingActionButton.extended(
                       heroTag: 'add-fab',
-                      onPressed: _addExpense,
+                      onPressed: _addMenu,
                       icon: const Icon(Icons.add),
-                      label: const Text('Add expense'),
+                      label: const Text('Add'),
                     ),
                   ],
                 ),
@@ -241,7 +313,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     final name = (c.profile?.name.trim().isNotEmpty ?? false)
         ? c.profile!.name.trim().split(RegExp(r'\s+')).first
         : widget.user.firstName;
-    final recent = c.expenses.take(8).toList();
+    final recent = c.recentActivity;
+    final active = c.activeBudgets;
+    final dues = c.dues;
+    final today = DateTime.now();
 
     final greeting = <Widget>[
       Text(
@@ -249,7 +324,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
       ),
       Text(
-        monthTitle(c.monthKey),
+        '${monthName(today.month)} ${today.year}',
         style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
       ),
       const SizedBox(height: 16),
@@ -257,21 +332,64 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         _ErrorBanner(error: c.error!),
         const SizedBox(height: 16),
       ],
+      BalanceCard(
+        balance: c.balance,
+        symbol: c.symbol,
+        owed: BalanceCalculator.totalOwed(c.debts),
+        lent: BalanceCalculator.totalLent(c.debts),
+        onSetOpening: _setOpeningBalance,
+        onAddIncome: _addIncome,
+      ),
+      const SizedBox(height: 16),
     ];
 
     // Left: the numbers that matter most. Right: progress and recent activity.
     final summary = <Widget>[
       if (budget == null || daily == null)
         _SetupCard(
-          monthName: monthName(DateTime.now().month),
-          copying: _copying,
+          working: _repeating,
+          canRepeat: c.budgets.isNotEmpty,
           onSetup: _openBudgetSetup,
-          onCopy: _copyLastMonth,
+          onRepeat: _repeatLast,
         )
       else ...[
+        if (active.length > 1) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final b in active)
+                ChoiceChip(
+                  label: Text(budgetName(b)),
+                  selected: b.id == budget.id,
+                  onSelected: (_) => c.selectBudget(b.id),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
         SafeToSpendCard(daily: daily, symbol: c.symbol),
         const SizedBox(height: 16),
         MonthOverviewCard(budget: budget, stats: c.stats, symbol: c.symbol),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: _editCurrentBudget,
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit this budget'),
+          ),
+        ),
+      ],
+      if (dues.isNotEmpty) ...[
+        const _SectionHeader('Due dates'),
+        UpcomingDuesCard(
+          dues: dues,
+          symbol: c.symbol,
+          onTap: (item) => BillsScreen.openDue(context, c, widget.data, item),
+          onSeeAll: _openBills,
+        ),
+      ],
+      if (budget != null && daily != null) ...[
         const _SectionHeader('Flags'),
         FlagsSection(controller: c),
       ],
@@ -282,28 +400,34 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         CategoryProgressList(controller: c),
       ],
       _SectionHeader(
-        'Recent expenses',
-        trailing: recent.isEmpty
-            ? null
-            : TextButton(onPressed: _openAllExpenses, child: const Text('See all')),
+        'Recent activity',
+        trailing: recent.isEmpty ? null : TextButton(onPressed: _openTransactions, child: const Text('See all')),
       ),
       if (recent.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Text(
-            'No expenses yet this month. Tap Add expense to log your first one.',
+            'Nothing yet. Tap Add to log an expense or income.',
             style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
           ),
         )
       else
-        for (final expense in recent)
-          ExpenseTile(
-            expense: expense,
-            categoryById: c.categoryById,
-            symbol: c.symbol,
-            data: widget.data,
-            onTap: () => _editExpense(expense),
-          ),
+        for (final item in recent)
+          if (item.isIncome)
+            IncomeTile(
+              income: item.income!,
+              symbol: c.symbol,
+              data: widget.data,
+              onTap: () => _editIncome(item.income!),
+            )
+          else
+            ExpenseTile(
+              expense: item.expense!,
+              categoryById: c.categoryById,
+              symbol: c.symbol,
+              data: widget.data,
+              onTap: () => _editExpense(item.expense!),
+            ),
     ];
 
     final width = MediaQuery.sizeOf(context).width;
@@ -321,10 +445,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               children: [
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: summary)),
                 const SizedBox(width: 32),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  // Line the right column up with the cards (the section headers add their own top gap).
-                  ...details,
-                ])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: details)),
               ],
             ),
           ],
@@ -366,16 +487,16 @@ class _SectionHeader extends StatelessWidget {
 
 class _SetupCard extends StatelessWidget {
   const _SetupCard({
-    required this.monthName,
-    required this.copying,
+    required this.working,
+    required this.canRepeat,
     required this.onSetup,
-    required this.onCopy,
+    required this.onRepeat,
   });
 
-  final String monthName;
-  final bool copying;
+  final bool working;
+  final bool canRepeat;
   final VoidCallback onSetup;
-  final VoidCallback onCopy;
+  final VoidCallback onRepeat;
 
   @override
   Widget build(BuildContext context) {
@@ -391,7 +512,7 @@ class _SetupCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Set up your $monthName budget',
+              'Set up a budget',
               style: theme.textTheme.titleLarge?.copyWith(
                 color: scheme.onPrimaryContainer,
                 fontWeight: FontWeight.w700,
@@ -399,23 +520,21 @@ class _SetupCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Enter your income, fixed bills and a limit for each category. '
+              'Choose a week, a month, a year or your own dates, and how much money to budget. '
               'Then you will see how much you can safely spend every day.',
               style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onPrimaryContainer),
             ),
             const SizedBox(height: 20),
-            FilledButton(onPressed: copying ? null : onSetup, child: const Text('Set up budget')),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: copying ? null : onCopy,
-              child: copying
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Copy last month'),
-            ),
+            FilledButton(onPressed: working ? null : onSetup, child: const Text('Set up budget')),
+            if (canRepeat) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: working ? null : onRepeat,
+                child: working
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Repeat my last budget'),
+              ),
+            ],
           ],
         ),
       ),
