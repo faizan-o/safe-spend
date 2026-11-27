@@ -12,7 +12,10 @@ users/{uid}                      profile and settings              UserProfile
   monthStats/{monthKey}          running totals for a month        MonthStats
   monthSummaries/{monthKey}      generated month-end report        MonthSummary
   insights/{dayKey}              daily reminder suggestion         DailyInsight
+  receipts/{receiptId}           a scanned receipt                 Receipt
 ```
+
+Receipt pictures are compressed JPEGs in Firestore at `users/{uid}/receiptImages/{receiptId}` (a `Blob`, at most about 700 KB so it fits the 1 MiB document limit). The `receipts` record keeps a ~200 px thumbnail for the list.
 
 `uid` is the Firebase Authentication user id. `monthKey` looks like `2026-11` and `dayKey` like
 `2026-11-26`, both from the device's local date.
@@ -24,9 +27,10 @@ users/{uid}                      profile and settings              UserProfile
 | Categorized budget declared at the start of the month | `budgets/{monthKey}`: income plus a list of category limits |
 | Daily budget tracker (safe to spend today) | worked out from `budgets` and `monthStats`: `(flexiblePool - flexibleSpent) / days left` |
 | Speech-to-text entry | an `expenses` document with `source: voice` and the original `transcript` |
+| Receipt photo | a `receiptImages` document, a `receipts` record (status, time, what was read) and an `expenses` document with `source: receipt`, `receiptId`, `merchant` and `items` |
 | Red and green flags | worked out from `monthStats.spentByCategory` against the budget limits; saved in the summary |
 | Daily reminder with suggestions | reminder time in `users/{uid}.reminder`; the suggestion text in `insights/{dayKey}` |
-| Summary at the end of the month | `monthSummaries/{monthKey}` |
+| Summary at the end of the month | `monthSummaries/{monthKey}`: totals and flags, plus the written `report` |
 
 ## Decisions worth knowing
 
@@ -94,3 +98,23 @@ screen must also work there.
    ```
    Without the rules, production mode rejects every request. Do not use test mode.
 4. `flutter pub get`, then run the app. The first sign-in creates `users/{uid}` and the default categories.
+
+## n8n workflows
+
+Voice, receipt and month-end report workflows (see `n8n/README.md`) write to the same collections as the app.
+They use `n8n/schema/safespend.schema.json`, which `test/n8n_schema_test.dart` keeps in sync with the Dart models.
+Extra optional expense fields written by them: `merchant`, `confidence`, `requestId` (the expense id is derived from it, which
+prevents duplicates) and `items` (receipt lines). The security rules need no change: they validate only the required fields.
+
+## Receipts in Firestore
+
+1. The app shrinks the picture (about 1600 px, JPEG), stores it in `receiptImages/{id}`, and creates `receipts/{id}` (status `processing`, `hasImage`, `thumbnail`, `capturedAt`, `uploadedAt`) in one batch.
+2. It sends the picture and the `receiptId` to the n8n receipt workflow. When the workflow auto-saves the expense it
+   also sets the receipt to `saved` with the `expenseId`, in the same atomic commit. Otherwise the app records the result
+   (`needsReview`, `failed`) and, when the user saves or discards, `saved` or `discarded`.
+3. The Receipts tab lists them newest first with the thumbnail and time; tapping one loads the full picture.
+
+**Camera vs upload:** on Android and iOS the user can take a photo or pick one; on desktop and web they can only upload a file.
+
+**Setup:** nothing beyond `firebase deploy --only firestore` (the rules now include `receiptImages`). No Storage bucket or Blaze plan is needed.
+Pictures that cannot be shrunk under the limit (for example a PDF) are still read by the workflow but are not kept.

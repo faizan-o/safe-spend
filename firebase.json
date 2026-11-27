@@ -1,1 +1,17 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"safespend-backend","appId":"1:739346237582:android:b3fbe2ad35a73ff0afa1df","fileOutput":"android/app/google-services.json"}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "safespend-backend",
+          "appId": "1:739346237582:android:b3fbe2ad35a73ff0afa1df",
+          "fileOutput": "android/app/google-services.json"
+        }
+      }
+    }
+  }
+}

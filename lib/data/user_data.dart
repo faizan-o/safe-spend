@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
 
 import '../models/user_profile.dart';
@@ -9,6 +8,7 @@ import 'category_repository.dart';
 import 'expense_repository.dart';
 import 'firestore_paths.dart';
 import 'insight_repository.dart';
+import 'receipt_repository.dart';
 import 'summary_repository.dart';
 import 'user_repository.dart';
 
@@ -41,6 +41,8 @@ class UserData {
       userDoc.collection(FirestorePaths.monthSummaries);
   late final CollectionReference<Map<String, dynamic>> _insightsCol =
       userDoc.collection(FirestorePaths.insights);
+  late final CollectionReference<Map<String, dynamic>> _receiptsCol =
+      userDoc.collection(FirestorePaths.receipts);
 
   late final UserRepository profile = UserRepository(userDoc);
   late final CategoryRepository categories =
@@ -50,6 +52,9 @@ class UserData {
       ExpenseRepository(firestore, _expensesCol, _statsCol);
   late final SummaryRepository summaries = SummaryRepository(_summariesCol);
   late final InsightRepository insights = InsightRepository(_insightsCol);
+  late final CollectionReference<Map<String, dynamic>> _receiptImagesCol =
+      userDoc.collection(FirestorePaths.receiptImages);
+  late final ReceiptRepository receipts = ReceiptRepository(_receiptsCol, _receiptImagesCol);
 
   /// Creates the profile and the default categories the first time a user
   /// signs in. Safe to call on every sign-in: it does nothing for an existing
@@ -84,12 +89,15 @@ class UserData {
   }
 
   /// Deletes every document stored for this user (expenses, budgets,
-  /// categories, stats, summaries, insights and the profile). Needed for the
+  /// categories, stats, summaries, insights, receipts with their pictures, and
+  /// the profile). Needed for the
   /// in-app "delete my account" option that the app stores require. Deleting
   /// the sign-in account itself is a separate step in the auth service.
   /// Needs the device to be online.
   Future<void> deleteAllData() async {
     for (final collection in [
+      _receiptsCol,
+      _receiptImagesCol,
       _expensesCol,
       _statsCol,
       _budgetsCol,

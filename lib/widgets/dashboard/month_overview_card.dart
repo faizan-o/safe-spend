@@ -31,7 +31,7 @@ class MonthOverviewCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      color: scheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(20),

@@ -8,6 +8,8 @@
 ///   monthStats/{monthKey}          running totals for a month
 ///   monthSummaries/{monthKey}      generated month-end reports
 ///   insights/{dayKey}              daily reminder suggestions
+///   receipts/{receiptId}           photographed receipts (record + small thumbnail)
+///   receiptImages/{receiptId}      the compressed receipt picture (one Firestore document)
 class FirestorePaths {
   const FirestorePaths._();
 
@@ -18,4 +20,6 @@ class FirestorePaths {
   static const monthStats = 'monthStats';
   static const monthSummaries = 'monthSummaries';
   static const insights = 'insights';
+  static const receipts = 'receipts';
+  static const receiptImages = 'receiptImages';
 }

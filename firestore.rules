@@ -42,7 +42,7 @@ service cloud.firestore {
       // budgets and let writes skip the checks above.
       match /{collection}/{docId} {
         allow read, write: if isOwner(uid)
-          && collection in ['categories', 'monthStats', 'monthSummaries', 'insights'];
+          && collection in ['categories', 'monthStats', 'monthSummaries', 'insights', 'receipts', 'receiptImages'];
       }
     }
   }

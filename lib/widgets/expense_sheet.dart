@@ -22,6 +22,7 @@ Future<bool?> showExpenseSheet(
   required List<ExpenseCategory> categories,
   required String symbol,
   Expense? existing,
+  void Function(String expenseId)? onAdded,
 }) {
   return showModalBottomSheet<bool>(
     context: context,
@@ -33,6 +34,7 @@ Future<bool?> showExpenseSheet(
       categories: categories,
       symbol: symbol,
       existing: existing,
+      onAdded: onAdded,
     ),
   );
 }
@@ -44,7 +46,11 @@ class ExpenseSheet extends StatefulWidget {
     required this.categories,
     required this.symbol,
     this.existing,
+    this.onAdded,
   });
+
+  /// Called with the new id when the sheet saved a new expense.
+  final void Function(String expenseId)? onAdded;
 
   final UserData data;
   final List<ExpenseCategory> categories;
@@ -59,7 +65,7 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
   static const int _maxAmount = 100000000000; // Rs. 1,000,000,000 in paisa
 
   late final TextEditingController _amount = TextEditingController(
-    text: widget.existing == null ? '' : amountForField(widget.existing!.amount),
+    text: widget.existing == null || widget.existing!.amount <= 0 ? '' : amountForField(widget.existing!.amount),
   );
   late final TextEditingController _note =
       TextEditingController(text: widget.existing?.note ?? '');
@@ -148,23 +154,25 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
 
     final category = _selected!;
     final existing = widget.existing;
-    final expense = Expense(
-      id: existing?.id ?? '',
-      amount: minor!,
-      categoryId: category.id,
-      categoryName: category.name,
-      categoryKind: category.kind,
-      note: _note.text.trim(),
-      date: _resolveDate(),
-      source: existing?.source ?? ExpenseSource.manual,
-      transcript: existing?.transcript,
-    );
+    // Editing keeps everything the sheet does not show (source, transcript,
+    // merchant, receipt link, ...).
+    final expense = existing != null
+        ? existing.copyWith(amount: minor!, category: category, note: _note.text.trim(), date: _resolveDate())
+        : Expense(
+            amount: minor!,
+            categoryId: category.id,
+            categoryName: category.name,
+            categoryKind: category.kind,
+            note: _note.text.trim(),
+            date: _resolveDate(),
+          );
 
     // The write is queued locally at once and confirmed by the server later,
     // so close the sheet now instead of waiting (it may be offline).
     final messenger = ScaffoldMessenger.of(context);
+    final onAdded = widget.onAdded;
     final Future<void> write = (!_editing || existing == null)
-        ? widget.data.expenses.addExpense(expense)
+        ? widget.data.expenses.addExpense(expense).then((id) => onAdded?.call(id))
         : widget.data.expenses.updateExpense(previous: existing, updated: expense);
     write.then((_) {}, onError: (Object error) {
       messenger.showSnackBar(

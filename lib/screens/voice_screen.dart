@@ -1,14 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/user_data.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
+import '../utils/platform_support.dart';
+import '../utils/receipt_image.dart';
+import '../voice/receipt_client.dart';
 import '../voice/speech_recognizer.dart';
 import '../voice/voice_controller.dart';
 import '../voice/voice_workflow_client.dart';
 import '../widgets/auth_widgets.dart';
+import 'settings_screen.dart';
 import '../widgets/expense_sheet.dart';
 import '../widgets/voice/mic_button.dart';
 import '../widgets/voice/voice_result_card.dart';
@@ -22,7 +27,7 @@ class VoiceScreen extends StatefulWidget {
     required this.user,
     required this.data,
     required this.isActive,
-    required this.onOpenDashboard,
+    this.onOpenDashboard,
   });
 
   final AuthService auth;
@@ -31,13 +36,15 @@ class VoiceScreen extends StatefulWidget {
 
   /// False while another tab is showing; the microphone is turned off then.
   final bool isActive;
-  final VoidCallback onOpenDashboard;
+  /// Null on wide screens, where the side navigation already has a Dashboard entry.
+  final VoidCallback? onOpenDashboard;
 
   @override
-  State<VoiceScreen> createState() => _VoiceScreenState();
+  State<VoiceScreen> createState() => VoiceScreenState();
 }
 
-class _VoiceScreenState extends State<VoiceScreen> {
+/// The state is public so the Receipts tab can start a scan.
+class VoiceScreenState extends State<VoiceScreen> {
   static const List<String> _examples = [
     'Spent 500 on lunch',
     '1,200 for groceries yesterday',
@@ -56,6 +63,8 @@ class _VoiceScreenState extends State<VoiceScreen> {
       userId: widget.user.uid,
       recognizer: PluginSpeechRecognizer(),
       workflow: createVoiceWorkflowClient(widget.auth),
+      receipts: createReceiptClient(widget.auth),
+      vault: widget.data.receipts,
       saveExpense: (expense) => widget.data.expenses.addExpense(expense),
     );
     _subscriptions.add(widget.data.categories
@@ -96,6 +105,72 @@ class _VoiceScreenState extends State<VoiceScreen> {
     unawaited(_controller.submitText(text));
   }
 
+  final ImagePicker _picker = ImagePicker();
+
+  /// Lets the user take a photo of a receipt or pick one from the gallery.
+  Future<void> scanReceipt() async {
+    // Phones can take a photo; desktop and web can only upload a file.
+    ImageSource? source = ImageSource.gallery;
+    if (canUseCamera) {
+      source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Take a photo'),
+                onTap: () => Navigator.of(context).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Upload from gallery'),
+                onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (source == null || !mounted) return;
+
+    try {
+      final file = await _picker.pickImage(source: source, maxWidth: 3200, maxHeight: 3200, imageQuality: 92);
+      if (file == null) return; // cancelled
+      final raw = await file.readAsBytes();
+      final prepared = await prepareReceiptImage(
+        raw,
+        _mimeTypeOf(file),
+        longestSide: readingLongestSide,
+        maxBytes: readingMaxBytes,
+        quality: 85,
+      );
+      if (!mounted) return;
+      unawaited(_controller.submitReceipt(prepared.bytes, prepared.mimeType));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text(canUseCamera
+              ? 'Could not open the camera or gallery. Check the app permissions in your phone settings.'
+              : 'Could not open that file. Choose a JPG or PNG picture.'),
+        ));
+    }
+  }
+
+  String _mimeTypeOf(XFile file) {
+    final declared = file.mimeType;
+    if (declared != null && declared.startsWith('image/')) return declared;
+    final name = file.path.toLowerCase();
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
+
   Future<void> _editDraft() async {
     final draft = _controller.draft;
     if (draft == null) return;
@@ -105,6 +180,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
       categories: _controller.categories,
       symbol: _controller.symbol,
       existing: draft,
+      onAdded: (id) => _controller.linkSaved(draft, id),
     );
     if (saved == true) _controller.markSaved();
   }
@@ -121,17 +197,20 @@ class _VoiceScreenState extends State<VoiceScreen> {
       appBar: AppBar(
         title: const Text(AppConfig.appName),
         actions: [
-          TextButton.icon(
-            onPressed: widget.onOpenDashboard,
-            icon: const Icon(Icons.dashboard_outlined),
-            label: const Text('Dashboard'),
-          ),
+          if (widget.onOpenDashboard != null)
+            TextButton.icon(
+              onPressed: widget.onOpenDashboard,
+              icon: const Icon(Icons.dashboard_outlined),
+              label: const Text('Dashboard'),
+            ),
           PopupMenuButton<String>(
             tooltip: 'Menu',
             onSelected: (value) {
+              if (value == 'settings') openSettings(context, widget.auth, widget.user);
               if (value == 'signout') unawaited(widget.auth.signOut());
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'settings', child: Text('Settings')),
               PopupMenuItem(value: 'signout', child: Text('Sign out')),
             ],
           ),
@@ -156,7 +235,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(24, 16, 24, 24 + keyboard),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
+            constraints: const BoxConstraints(maxWidth: 520),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -185,6 +264,16 @@ class _VoiceScreenState extends State<VoiceScreen> {
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleMedium,
                 ),
+                if (canType) ...[
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: scanReceipt,
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      label: Text(canUseCamera ? 'Scan a receipt' : 'Upload a receipt'),
+                    ),
+                  ),
+                ],
                 if (c.languages.length > 1) ...[
                   const SizedBox(height: 16),
                   Center(child: _languagePicker(c)),
@@ -280,7 +369,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
       case VoiceState.initializing:
         return 'Getting the microphone ready…';
       case VoiceState.ready:
-        return 'Tap the mic and say what you spent.';
+        return 'Tap the mic and say what you spent, or scan a receipt.';
       case VoiceState.listening:
         return 'Listening. Try "500 on lunch".';
       case VoiceState.sending:
@@ -320,7 +409,7 @@ class _TranscriptBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Text(

@@ -1,7 +1,7 @@
 # SafeSpend
 
 Monthly finance manager that shows one daily safe-to-spend number.
-This first step contains the startup UI and authentication.
+Voice and receipt expense entry, a safe-to-spend dashboard, and AI month-end reports. Sign-in uses Firebase; the AI parts run in n8n with Gemini.
 
 ## Run it
 
@@ -11,7 +11,7 @@ This folder holds the Dart code only. Generate the Android/iOS platform folders 
 cd safespend
 flutter create . --project-name safespend --platforms=android,ios
 flutter pub get
-flutter run
+flutter run --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook   # leave the define out to use dummy voice/receipt
 ```
 
 `flutter create .` keeps the existing `lib/`, `pubspec.yaml` and `test/` files. If it overwrites
@@ -64,33 +64,35 @@ message that Firebase is needed; it signs in for real once Firebase is configure
 
 ```
 lib/
-  main.dart                       picks Firebase or demo sign-in, starts the app
-  theme.dart                      colors, input and button styles, app name
-  firebase_options.dart           placeholder, replaced by flutterfire configure
-  services/
-    auth_service.dart             interface the screens use (backend-independent)
-    firebase_auth_service.dart    real accounts via Firebase Authentication
-    local_auth_service.dart       on-device demo accounts
+  main.dart, theme.dart, firebase_options.dart
+  config/voice_config.dart        n8n address (N8N_BASE_URL)
+  services/                       sign-in (Firebase or on-device demo)
+  models/, data/                  Firestore schema and repositories (docs/database.md)
+  logic/                          budget maths and the dashboard controller
+  voice/                          speech-to-text, voice + receipt workflow clients, VoiceController
+  report/report_client.dart       asks n8n to (re)build a month report
   screens/
-    auth_gate.dart                signed in -> home, signed out -> welcome
-    welcome_screen.dart           first screen: Create account / Sign in
-    sign_up_screen.dart           name, email, password, confirm password
-    sign_in_screen.dart           email, password, forgot password link
-    forgot_password_screen.dart   sends a reset link
-    home_screen.dart              placeholder shown after sign-in
-  widgets/auth_widgets.dart       shared fields, button and message banner
-  utils/validators.dart           form validation rules
-test/validators_test.dart         unit tests for the validators
+    auth_gate / welcome / sign_in / sign_up / forgot_password
+    main_shell.dart               tabs: Voice (default), Dashboard, Receipts
+    receipts_screen.dart          timestamped receipts and receipt detail
+    voice_screen.dart             speak, type or scan a receipt
+    dashboard_screen.dart         safe-to-spend, flags, progress, expenses
+    budget_setup_screen / expenses_screen / report_screen
+  widgets/                        shared UI
+n8n/                              importable workflows, schema, README, local tests
+docs/                             database.md, voice-n8n.md
+firestore.rules, firestore.indexes.json
 ```
 
-## Database
+## Docs
 
-Data is stored in Cloud Firestore under `users/{uid}`. The schema, the decisions behind it, usage
-examples and the Firebase setup steps are in [docs/database.md](docs/database.md). Security rules are
-in `firestore.rules`.
+- [docs/database.md](docs/database.md): Firestore schema, rules, setup.
+- [n8n/README.md](n8n/README.md): import the 3 workflows, credentials (Firebase service account + Gemini key), contracts.
+- [docs/voice-n8n.md](docs/voice-n8n.md): turning the app's n8n connection on, platform permissions (microphone, camera).
 
-## Next steps
+## Checklist to go live
 
-1. Monthly budget setup (income, fixed bills, category budgets) and storage in Cloud Firestore
-2. Expense entry (text first, then voice) and the daily safe-to-spend calculation
-3. Red and green flags, daily reminder, month-end summary
+1. Firebase: Auth + Firestore (no Storage and no paid plan needed), `flutterfire configure`, then `firebase deploy --only firestore`.
+2. n8n: import and activate the workflows, add credentials, edit each Config node.
+3. Run with `--dart-define=N8N_BASE_URL=.../webhook`; add the Android/iOS permissions from docs/voice-n8n.md.
+4. `flutter analyze` and `flutter test`.

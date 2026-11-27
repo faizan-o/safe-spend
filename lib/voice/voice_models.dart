@@ -68,6 +68,8 @@ class ParsedExpense {
     this.categoryId,
     this.categoryName,
     this.note,
+    this.merchant,
+    this.items = const [],
     this.date,
     this.dateOnly = false,
   });
@@ -78,11 +80,26 @@ class ParsedExpense {
   final String? categoryName;
   final String? note;
 
+  /// Shop or payee, when the workflow found one.
+  final String? merchant;
+
+  /// Receipt lines (amounts in rupees).
+  final List<ParsedItem> items;
+
   /// When it was spent; null means now.
   final DateTime? date;
 
   /// True when the workflow sent only a day ("2026-11-25") and no time.
   final bool dateOnly;
+}
+
+/// One receipt line as the workflow reports it (amount in rupees).
+class ParsedItem {
+  const ParsedItem({required this.description, required this.amount, this.quantity = 1});
+
+  final String description;
+  final double amount;
+  final int quantity;
 }
 
 /// The workflow's answer.
@@ -93,7 +110,29 @@ class VoiceWorkflowResult {
     this.expense,
     this.confidence,
     this.workflow,
+    this.saved = false,
+    this.duplicate = false,
+    this.needsReview = false,
+    this.reviewReasons = const [],
+    this.expenseId,
   });
+
+  /// The id of the expense the workflow saved (when [saved]).
+  final String? expenseId;
+
+  /// True when the workflow already stored the expense (and updated the
+  /// month totals). The app must not save it again.
+  final bool saved;
+
+  /// True when this exact request had already been saved before.
+  final bool duplicate;
+
+  /// True when the workflow was not sure enough to save and wants the user
+  /// to check the expense first. The app then saves it itself after review.
+  final bool needsReview;
+
+  /// Why review is needed, for example `low_confidence` or `category_uncertain`.
+  final List<String> reviewReasons;
 
   final VoiceWorkflowStatus status;
 
@@ -139,6 +178,16 @@ class VoiceWorkflowResult {
           categoryId: _asString(map['categoryId']),
           categoryName: _asString(map['categoryName']),
           note: _asString(map['note']),
+          merchant: _asString(map['merchant']),
+          items: [
+            for (final raw in map['items'] is List ? map['items'] as List : const [])
+              if (raw is Map && _asDouble(raw['amount']) != null && _asString(raw['description']) != null)
+                ParsedItem(
+                  description: _asString(raw['description'])!,
+                  amount: _asDouble(raw['amount'])!,
+                  quantity: (_asDouble(raw['quantity']) ?? 1).round().clamp(1, 1000),
+                ),
+          ],
           date: dateText is String ? DateTime.tryParse(dateText.trim()) : null,
           dateOnly: dateText is String && dateText.trim().length == 10,
         );
@@ -151,6 +200,14 @@ class VoiceWorkflowResult {
       expense: expense,
       confidence: _asDouble(json['confidence']),
       workflow: _asString(json['workflow']),
+      expenseId: _asString(json['expenseId']),
+      saved: json['saved'] == true,
+      duplicate: json['duplicate'] == true,
+      needsReview: json['needsReview'] == true,
+      reviewReasons: [
+        for (final reason in json['reviewReasons'] is List ? json['reviewReasons'] as List : const [])
+          if (reason is String) reason,
+      ],
     );
   }
 

@@ -17,8 +17,11 @@ import '../widgets/dashboard/safe_to_spend_card.dart';
 import '../widgets/expense_sheet.dart';
 import 'budget_setup_screen.dart';
 import 'expenses_screen.dart';
+import 'report_screen.dart';
+import 'settings_screen.dart';
+import '../utils/responsive.dart';
 
-enum _MenuAction { editBudget, allExpenses, signOut }
+enum _MenuAction { editBudget, allExpenses, report, settings, signOut }
 
 /// The main screen: today's safe-to-spend number, the month at a glance, red
 /// and green flags, category progress and recent expenses.
@@ -127,6 +130,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
+  void _openReport() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReportScreen(
+          auth: widget.auth,
+          user: widget.user,
+          data: widget.data,
+          symbol: _controller.symbol,
+        ),
+      ),
+    );
+  }
+
   Future<void> _copyLastMonth() async {
     final c = _controller;
     setState(() => _copying = true);
@@ -170,6 +186,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                       _openBudgetSetup();
                     case _MenuAction.allExpenses:
                       _openAllExpenses();
+                    case _MenuAction.report:
+                      _openReport();
+                    case _MenuAction.settings:
+                      openSettings(context, widget.auth, widget.user);
                     case _MenuAction.signOut:
                       unawaited(_signOut());
                   }
@@ -177,6 +197,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: _MenuAction.editBudget, child: Text('Edit budget')),
                   PopupMenuItem(value: _MenuAction.allExpenses, child: Text('All expenses')),
+                  PopupMenuItem(value: _MenuAction.report, child: Text('Monthly report')),
+                  PopupMenuItem(value: _MenuAction.settings, child: Text('Settings')),
                   PopupMenuItem(value: _MenuAction.signOut, child: Text('Sign out')),
                 ],
               ),
@@ -221,62 +243,98 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         : widget.user.firstName;
     final recent = c.expenses.take(8).toList();
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-      children: [
-        Text(
-          'Hi, $name',
-          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        Text(
-          monthTitle(c.monthKey),
-          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-        ),
+    final greeting = <Widget>[
+      Text(
+        'Hi, $name',
+        style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+      ),
+      Text(
+        monthTitle(c.monthKey),
+        style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 16),
+      if (c.error != null) ...[
+        _ErrorBanner(error: c.error!),
         const SizedBox(height: 16),
-        if (c.error != null) ...[
-          _ErrorBanner(error: c.error!),
-          const SizedBox(height: 16),
-        ],
-        if (budget == null || daily == null)
-          _SetupCard(
-            monthName: monthName(DateTime.now().month),
-            copying: _copying,
-            onSetup: _openBudgetSetup,
-            onCopy: _copyLastMonth,
-          )
-        else ...[
-          SafeToSpendCard(daily: daily, symbol: c.symbol),
-          const SizedBox(height: 16),
-          MonthOverviewCard(budget: budget, stats: c.stats, symbol: c.symbol),
-          const _SectionHeader('Flags'),
-          FlagsSection(controller: c),
-          const _SectionHeader('Budget progress'),
-          CategoryProgressList(controller: c),
-        ],
-        _SectionHeader(
-          'Recent expenses',
-          trailing: recent.isEmpty
-              ? null
-              : TextButton(onPressed: _openAllExpenses, child: const Text('See all')),
-        ),
-        if (recent.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              'No expenses yet this month. Tap Add expense to log your first one.',
-              style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          )
-        else
-          for (final expense in recent)
-            ExpenseTile(
-              expense: expense,
-              categoryById: c.categoryById,
-              symbol: c.symbol,
-              data: widget.data,
-              onTap: () => _editExpense(expense),
-            ),
       ],
+    ];
+
+    // Left: the numbers that matter most. Right: progress and recent activity.
+    final summary = <Widget>[
+      if (budget == null || daily == null)
+        _SetupCard(
+          monthName: monthName(DateTime.now().month),
+          copying: _copying,
+          onSetup: _openBudgetSetup,
+          onCopy: _copyLastMonth,
+        )
+      else ...[
+        SafeToSpendCard(daily: daily, symbol: c.symbol),
+        const SizedBox(height: 16),
+        MonthOverviewCard(budget: budget, stats: c.stats, symbol: c.symbol),
+        const _SectionHeader('Flags'),
+        FlagsSection(controller: c),
+      ],
+    ];
+    final details = <Widget>[
+      if (budget != null && daily != null) ...[
+        const _SectionHeader('Budget progress'),
+        CategoryProgressList(controller: c),
+      ],
+      _SectionHeader(
+        'Recent expenses',
+        trailing: recent.isEmpty
+            ? null
+            : TextButton(onPressed: _openAllExpenses, child: const Text('See all')),
+      ),
+      if (recent.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Text(
+            'No expenses yet this month. Tap Add expense to log your first one.',
+            style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        )
+      else
+        for (final expense in recent)
+          ExpenseTile(
+            expense: expense,
+            categoryById: c.categoryById,
+            symbol: c.symbol,
+            data: widget.data,
+            onTap: () => _editExpense(expense),
+          ),
+    ];
+
+    final width = MediaQuery.sizeOf(context).width;
+    if (width >= Responsive.twoColumnBreakpoint) {
+      // Desktop / large window: two columns, centered.
+      final side = ((width - 1200) / 2).clamp(24.0, double.infinity);
+      return SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(side, 16, side, 96),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ...greeting,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: summary)),
+                const SizedBox(width: 32),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  // Line the right column up with the cards (the section headers add their own top gap).
+                  ...details,
+                ])),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView(
+      padding: Responsive.listPadding(context, maxWidth: 640, top: 8, bottom: 96),
+      children: [...greeting, ...summary, ...details],
     );
   }
 }

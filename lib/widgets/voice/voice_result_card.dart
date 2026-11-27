@@ -23,7 +23,7 @@ class VoiceResultCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -98,9 +98,39 @@ class _Understood extends StatelessWidget {
             ),
           ],
         ),
-        if (draft.note.isNotEmpty) ...[
+        if (draft.merchant != null && draft.merchant!.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text('Shop: ${draft.merchant}', style: theme.textTheme.bodyMedium),
+        ],
+        if (draft.items.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          for (final item in draft.items.take(6))
+            Row(children: [
+              Expanded(child: Text('${item.quantity > 1 ? '${item.quantity} × ' : ''}${item.description}', style: theme.textTheme.bodySmall)),
+              Text(Money.format(item.amount, symbol: controller.symbol, showDecimals: item.amount % 100 != 0), style: theme.textTheme.bodySmall),
+            ]),
+          if (draft.items.length > 6)
+            Text('+ ${draft.items.length - 6} more', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+        ],
+        if (draft.note.isNotEmpty && draft.note != draft.merchant) ...[
           const SizedBox(height: 12),
           Text('Note: ${draft.note}', style: theme.textTheme.bodyMedium),
+        ],
+        if (result.needsReview && result.reviewReasons.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  result.reviewReasons.map(_reasonText).whereType<String>().toSet().join(' '),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
         ],
         if (result.message.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -138,6 +168,17 @@ class _Understood extends StatelessWidget {
     );
   }
 }
+
+String? _reasonText(String reason) => switch (reason) {
+      'low_confidence' => "I'm not fully sure about this one, so please check it.",
+      'category_uncertain' => "I wasn't sure about the category.",
+      'large_amount' => 'This is a large amount.',
+      'future_date' => 'The date was in the future, so I used today.',
+      'old_date' => 'The date is quite old.',
+      'currency_mismatch' => 'This looks like a different currency from yours.',
+      'save_failed' => "I couldn't save it automatically.",
+      _ => null,
+    };
 
 class _NotUnderstood extends StatelessWidget {
   const _NotUnderstood({required this.controller, required this.result});

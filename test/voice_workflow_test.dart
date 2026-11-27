@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:safespend/models/category.dart';
+import 'package:safespend/voice/receipt_client.dart';
 import 'package:safespend/voice/voice_models.dart';
 import 'package:safespend/voice/voice_workflow_client.dart';
 
@@ -103,5 +105,62 @@ void main() {
       );
       expect(bad.submit(_request('x')), throwsA(isA<VoiceWorkflowException>()));
     });
+  });
+
+  test('result parsing: saved / review flags, merchant and items', () {
+    final r = VoiceWorkflowResult.fromDecoded({
+      'status': 'parsed',
+      'saved': true,
+      'duplicate': true,
+      'needsReview': true,
+      'reviewReasons': ['low_confidence', 7],
+      'expense': {
+        'amount': 100,
+        'merchant': 'Shop',
+        'items': [
+          {'description': 'Milk', 'amount': 50, 'quantity': 2},
+          {'description': '', 'amount': 5},
+        ],
+      },
+    });
+    expect(r.saved, isTrue);
+    expect(r.duplicate, isTrue);
+    expect(r.needsReview, isTrue);
+    expect(r.reviewReasons, ['low_confidence']);
+    expect(r.expense!.merchant, 'Shop');
+    expect(r.expense!.items.single.quantity, 2);
+  });
+
+  test('a 4xx answer shows the workflow\'s own message', () async {
+    final client = N8nVoiceWorkflowClient(
+      webhookUrl: 'https://example.com/x',
+      client: MockClient((_) async => http.Response(jsonEncode({'message': 'Please sign in again.'}), 401)),
+    );
+    expect(
+      client.submit(_request('x')),
+      throwsA(isA<VoiceWorkflowException>().having((e) => e.message, 'message', 'Please sign in again.')),
+    );
+  });
+
+  test('receipt requests carry the picture as base64', () async {
+    late Map<String, dynamic> sent;
+    final client = N8nReceiptClient(
+      url: 'https://example.com/receipt',
+      idToken: () async => 't',
+      client: MockClient((request) async {
+        sent = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'status': 'parsed', 'saved': true, 'expense': {'amount': 10}}), 200);
+      }),
+    );
+    final result = await client.submit(ReceiptRequest(
+      clientRequestId: 'r',
+      userId: 'u1',
+      bytes: Uint8List.fromList([1, 2, 3]),
+      mimeType: 'image/jpeg',
+      sentAt: DateTime(2026, 11, 26),
+    ));
+    expect(sent['imageBase64'], base64Encode([1, 2, 3]));
+    expect(sent['mimeType'], 'image/jpeg');
+    expect(result.saved, isTrue);
   });
 }

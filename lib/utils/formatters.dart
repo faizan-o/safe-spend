@@ -37,6 +37,14 @@ String dayLabel(DateTime date, DateTime now) {
   return date.year == now.year ? short : '$short ${date.year}';
 }
 
+/// "26 Nov 2026, 11:42 PM".
+String dateTimeLabel(DateTime date) {
+  final hour12 = date.hour % 12 == 0 ? 12 : date.hour % 12;
+  final minute = date.minute.toString().padLeft(2, '0');
+  final suffix = date.hour < 12 ? 'AM' : 'PM';
+  return '${date.day} ${monthName(date.month).substring(0, 3)} ${date.year}, $hour12:$minute $suffix';
+}
+
 String plural(int count, String one, [String? many]) {
   return count == 1 ? '$count $one' : '$count ${many ?? '${one}s'}';
 }

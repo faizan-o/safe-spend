@@ -7,6 +7,7 @@ import '../models/money.dart';
 import '../utils/formatters.dart';
 import '../widgets/dashboard/expense_tile.dart';
 import '../widgets/expense_sheet.dart';
+import '../utils/responsive.dart';
 
 /// Every expense of the month, grouped by day with a total per day.
 /// Swipe to delete, tap to edit.
@@ -57,7 +58,7 @@ class ExpensesScreen extends StatelessWidget {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  padding: Responsive.listPadding(context, maxWidth: 760),
                   itemCount: items.length,
                   itemBuilder: (context, index) {
                     final item = items[index];

@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:safespend/models/category.dart';
 import 'package:safespend/models/expense.dart';
+import 'package:safespend/voice/receipt_client.dart';
+import 'package:safespend/voice/receipt_vault.dart';
 import 'package:safespend/voice/speech_recognizer.dart';
 import 'package:safespend/voice/voice_controller.dart';
 import 'package:safespend/voice/voice_models.dart';
@@ -42,10 +46,46 @@ class FakeRecognizer implements SpeechRecognizer {
   Future<void> cancel() async {}
 }
 
+class FakeVault implements ReceiptVault {
+  final List<String> calls = [];
+
+  @override
+  Future<String> store(Uint8List bytes, String mimeType, DateTime capturedAt) async {
+    calls.add('store');
+    return 'rc1';
+  }
+
+  @override
+  Future<void> recordResult(String receiptId, VoiceWorkflowResult result, {Expense? draft}) async {
+    calls.add('result:${draft == null ? 'none' : 'draft'}');
+  }
+
+  @override
+  Future<void> markSaved(String receiptId, String expenseId, Expense expense) async {
+    calls.add('saved:$receiptId:$expenseId');
+  }
+
+  @override
+  Future<void> markDiscarded(String receiptId) async => calls.add('discarded:$receiptId');
+
+  @override
+  Future<void> markFailed(String receiptId, String message) async => calls.add('failed:$receiptId');
+}
+
 class FailingClient implements VoiceWorkflowClient {
   @override
   Future<VoiceWorkflowResult> submit(VoiceWorkflowRequest request) =>
       throw const VoiceWorkflowException('down');
+}
+
+class SavedByWorkflowClient implements VoiceWorkflowClient {
+  @override
+  Future<VoiceWorkflowResult> submit(VoiceWorkflowRequest request) async => const VoiceWorkflowResult(
+        status: VoiceWorkflowStatus.parsed,
+        saved: true,
+        expense: ParsedExpense(amount: 500, categoryId: 'food', categoryName: 'Food'),
+        workflow: 'n8n-voice',
+      );
 }
 
 const _categories = [
@@ -62,7 +102,10 @@ void main() {
       userId: 'u1',
       recognizer: recognizer,
       workflow: client ?? DummyVoiceWorkflowClient(delay: Duration.zero),
-      saveExpense: (e) async => saved.add(e),
+      saveExpense: (e) async {
+        saved.add(e);
+        return 'exp${saved.length}';
+      },
     );
     c.setCategories(_categories);
     return c;
@@ -131,6 +174,80 @@ void main() {
     c.discard();
     expect(c.state, VoiceState.ready);
     expect(c.draft, isNull);
+    c.dispose();
+  });
+
+  test('an expense the workflow already saved is not saved again', () async {
+    final c = make(SavedByWorkflowClient());
+    await c.init();
+    await c.submitText('500 lunch');
+    expect(c.state, VoiceState.ready);
+    expect(c.draft, isNull);
+    expect(c.notice, contains('Saved'));
+    expect(saved, isEmpty);
+    c.dispose();
+  });
+
+  test('a receipt goes to review and is saved as a receipt expense', () async {
+    final c = VoiceController(
+      userId: 'u1',
+      recognizer: recognizer,
+      workflow: DummyVoiceWorkflowClient(delay: Duration.zero),
+      receipts: DummyReceiptClient(delay: Duration.zero),
+      saveExpense: (e) async {
+        saved.add(e);
+        return 'exp${saved.length}';
+      },
+    );
+    c.setCategories(const [
+      ExpenseCategory(id: 'groceries', name: 'Groceries', iconKey: 'x', colorValue: 0xFF000000),
+      ExpenseCategory(id: 'other', name: 'Other', iconKey: 'x', colorValue: 0xFF000000),
+    ]);
+    await c.init();
+    await c.submitReceipt(Uint8List.fromList([1]), 'image/jpeg');
+    expect(c.state, VoiceState.result);
+    expect(c.result!.needsReview, isTrue);
+    expect(c.draft!.source, ExpenseSource.receipt);
+    expect(c.draft!.merchant, 'Sample Mart');
+    expect(c.draft!.items, hasLength(2));
+    expect(c.draft!.transcript, isNull);
+    c.save();
+    await Future<void>.delayed(Duration.zero);
+    expect(saved.single.amount, 125000);
+    c.dispose();
+  });
+
+  test('a scanned receipt is stored, linked to its expense when saved, and marked discarded otherwise', () async {
+    final vault = FakeVault();
+    VoiceController build() => VoiceController(
+          userId: 'u1',
+          recognizer: recognizer,
+          workflow: DummyVoiceWorkflowClient(delay: Duration.zero),
+          receipts: DummyReceiptClient(delay: Duration.zero),
+          vault: vault,
+          saveExpense: (e) async {
+            saved.add(e);
+            return 'exp${saved.length}';
+          },
+        )..setCategories(const [
+            ExpenseCategory(id: 'groceries', name: 'Groceries', iconKey: 'x', colorValue: 0xFF000000),
+            ExpenseCategory(id: 'other', name: 'Other', iconKey: 'x', colorValue: 0xFF000000),
+          ]);
+
+    final c = build();
+    await c.init();
+    await c.submitReceipt(Uint8List.fromList([1]), 'image/jpeg');
+    expect(c.draft!.receiptId, 'rc1');
+    expect(vault.calls, ['store', 'result:draft']);
+    c.save();
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(vault.calls.last, 'saved:rc1:exp1');
+    expect(saved.single.receiptId, 'rc1');
+
+    await c.submitReceipt(Uint8List.fromList([2]), 'image/jpeg');
+    c.discard();
+    expect(vault.calls.last, 'discarded:rc1');
     c.dispose();
   });
 }

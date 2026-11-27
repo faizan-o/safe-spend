@@ -5,7 +5,30 @@ import 'date_keys.dart';
 import 'map_readers.dart';
 
 /// How an expense was entered.
-enum ExpenseSource { manual, voice }
+enum ExpenseSource { manual, voice, receipt }
+
+/// One line of a receipt. Only receipts read by the n8n workflow have these.
+class ExpenseItem {
+  const ExpenseItem({required this.description, required this.amount, this.quantity = 1});
+
+  final String description;
+
+  /// Line total in minor units.
+  final int amount;
+  final int quantity;
+
+  factory ExpenseItem.fromMap(Map<String, dynamic> map) => ExpenseItem(
+        description: readString(map, 'description'),
+        amount: readInt(map, 'amount'),
+        quantity: readInt(map, 'quantity', 1),
+      );
+
+  Map<String, dynamic> toMap() => {
+        'description': description,
+        'amount': amount,
+        'quantity': quantity,
+      };
+}
 
 /// A single expense. Stored at users/{uid}/expenses/{id}.
 class Expense {
@@ -19,6 +42,11 @@ class Expense {
     required this.date,
     this.source = ExpenseSource.manual,
     this.transcript,
+    this.merchant,
+    this.confidence,
+    this.requestId,
+    this.receiptId,
+    this.items = const [],
     this.createdAt,
     this.updatedAt,
   });
@@ -43,6 +71,22 @@ class Expense {
   /// What the user said, when [source] is voice. Kept so a wrong parse can be
   /// corrected or reviewed.
   final String? transcript;
+
+  /// Shop or payee, read from a receipt or from what was said.
+  final String? merchant;
+
+  /// How sure the n8n workflow was (0 to 1). Null for manual expenses.
+  final double? confidence;
+
+  /// The client request id the n8n workflow saved this under. The expense id
+  /// is derived from it, so a repeated delivery cannot create a duplicate.
+  final String? requestId;
+
+  /// The receipt (users/{uid}/receipts/{receiptId}) this expense came from.
+  final String? receiptId;
+
+  /// Line items, for receipts.
+  final List<ExpenseItem> items;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -60,6 +104,11 @@ class Expense {
       date: readDate(map, 'date') ?? DateTime.fromMillisecondsSinceEpoch(0),
       source: enumByName(ExpenseSource.values, map['source'], ExpenseSource.manual),
       transcript: readStringOrNull(map, 'transcript'),
+      merchant: readStringOrNull(map, 'merchant'),
+      confidence: map['confidence'] is num ? (map['confidence'] as num).toDouble() : null,
+      requestId: readStringOrNull(map, 'requestId'),
+      receiptId: readStringOrNull(map, 'receiptId'),
+      items: readMapList(map, 'items').map(ExpenseItem.fromMap).toList(),
       createdAt: readDate(map, 'createdAt'),
       updatedAt: readDate(map, 'updatedAt'),
     );
@@ -79,6 +128,11 @@ class Expense {
         'monthKey': monthKey,
         'source': source.name,
         'transcript': transcript,
+        if (merchant != null) 'merchant': merchant,
+        if (confidence != null) 'confidence': confidence,
+        if (requestId != null) 'requestId': requestId,
+        if (receiptId != null) 'receiptId': receiptId,
+        if (items.isNotEmpty) 'items': items.map((i) => i.toMap()).toList(),
       };
 
   Expense copyWith({
@@ -97,6 +151,11 @@ class Expense {
       date: date ?? this.date,
       source: source,
       transcript: transcript,
+      merchant: merchant,
+      confidence: confidence,
+      requestId: requestId,
+      receiptId: receiptId,
+      items: items,
       createdAt: createdAt,
       updatedAt: updatedAt,
     );

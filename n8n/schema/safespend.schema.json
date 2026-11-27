@@ -1,0 +1,220 @@
+{
+  "$comment": "Machine-readable description of the SafeSpend Firestore schema, used by the n8n workflows. Keep in sync with lib/models; test/n8n_schema_test.dart fails if they drift.",
+  "version": 1,
+  "money": {
+    "unit": "paisa",
+    "minorPerMajor": 100,
+    "note": "All stored amounts are integers in paisa. Workflows and the app talk to users in rupees."
+  },
+  "keys": {
+    "monthKey": "yyyy-MM",
+    "dayKey": "yyyy-MM-dd",
+    "dayOfMonth": "two digits, e.g. 05",
+    "timeBasis": "the user's local date; clients send localDate and timeZoneOffsetMinutes"
+  },
+  "enums": {
+    "CategoryKind": [
+      "fixed",
+      "flexible",
+      "savings"
+    ],
+    "ExpenseSource": [
+      "manual",
+      "voice",
+      "receipt"
+    ],
+    "FlagType": [
+      "red",
+      "green",
+      "none"
+    ],
+    "ReceiptStatus": [
+      "processing",
+      "saved",
+      "needsReview",
+      "failed",
+      "discarded"
+    ]
+  },
+  "collections": {
+    "users/{uid}": {
+      "fields": [
+        "name",
+        "email",
+        "currencyCode",
+        "currencySymbol",
+        "reminder",
+        "onboardingComplete",
+        "createdAt"
+      ]
+    },
+    "users/{uid}/categories/{categoryId}": {
+      "fields": [
+        "name",
+        "iconKey",
+        "colorValue",
+        "kind",
+        "sortOrder",
+        "archived"
+      ]
+    },
+    "users/{uid}/budgets/{monthKey}": {
+      "fields": [
+        "monthKey",
+        "income",
+        "categories[{categoryId,name,iconKey,colorValue,kind,limit}]",
+        "updatedAt"
+      ]
+    },
+    "users/{uid}/expenses/{expenseId}": {
+      "required": [
+        "amount",
+        "categoryId",
+        "categoryName",
+        "categoryKind",
+        "note",
+        "date",
+        "dayKey",
+        "monthKey",
+        "source"
+      ],
+      "optional": [
+        "transcript",
+        "merchant",
+        "confidence",
+        "requestId",
+        "receiptId",
+        "items[{description,amount,quantity}]",
+        "createdAt",
+        "updatedAt"
+      ],
+      "rules": [
+        "amount is an int > 0",
+        "date is a timestamp",
+        "note <= 500 chars"
+      ]
+    },
+    "users/{uid}/monthStats/{monthKey}": {
+      "fields": [
+        "monthKey",
+        "totalSpent",
+        "flexibleSpent",
+        "expenseCount",
+        "spentByCategory{categoryId:int}",
+        "spentByDay{dd:int}",
+        "updatedAt"
+      ],
+      "invariant": "updated with increments in the SAME atomic commit as every expense add/edit/delete; only flexible categories add to flexibleSpent"
+    },
+    "users/{uid}/monthSummaries/{monthKey}": {
+      "fields": [
+        "monthKey",
+        "income",
+        "totalSpent",
+        "flexibleSpent",
+        "saved",
+        "categories[{categoryId,name,limit,spent,flag}]",
+        "suggestion",
+        "report{headline,narrative,overspent[],saved[],improvements[],partial,generatedBy}",
+        "generatedAt"
+      ]
+    },
+    "users/{uid}/insights/{dayKey}": {
+      "fields": [
+        "dayKey",
+        "message",
+        "predictedSpend",
+        "safeToSpend",
+        "createdAt"
+      ]
+    },
+    "users/{uid}/receipts/{receiptId}": {
+      "fields": [
+        "hasImage",
+        "thumbnail",
+        "mimeType",
+        "sizeBytes",
+        "status",
+        "message",
+        "merchant",
+        "amount",
+        "categoryId",
+        "categoryName",
+        "expenseId",
+        "monthKey",
+        "capturedAt",
+        "uploadedAt",
+        "updatedAt"
+      ],
+      "image": "the compressed JPEG is in users/{uid}/receiptImages/{receiptId} as {data: bytes, mimeType, sizeBytes, createdAt} (written by the app; the workflows never read it)",
+      "note": "the receipt workflow sets status=saved, expenseId, amount, category and merchant in the same commit as the expense when it auto-saves"
+    }
+  },
+  "defaultCategories": [
+    {
+      "id": "food",
+      "name": "Food & dining",
+      "kind": "flexible"
+    },
+    {
+      "id": "groceries",
+      "name": "Groceries",
+      "kind": "flexible"
+    },
+    {
+      "id": "transport",
+      "name": "Transport",
+      "kind": "flexible"
+    },
+    {
+      "id": "shopping",
+      "name": "Shopping",
+      "kind": "flexible"
+    },
+    {
+      "id": "entertainment",
+      "name": "Entertainment",
+      "kind": "flexible"
+    },
+    {
+      "id": "health",
+      "name": "Health",
+      "kind": "flexible"
+    },
+    {
+      "id": "education",
+      "name": "Education",
+      "kind": "flexible"
+    },
+    {
+      "id": "other",
+      "name": "Other",
+      "kind": "flexible"
+    },
+    {
+      "id": "rent",
+      "name": "Rent",
+      "kind": "fixed"
+    },
+    {
+      "id": "bills",
+      "name": "Bills & utilities",
+      "kind": "fixed"
+    },
+    {
+      "id": "committee",
+      "name": "Committee (kameti)",
+      "kind": "fixed"
+    },
+    {
+      "id": "savings",
+      "name": "Savings",
+      "kind": "savings"
+    }
+  ],
+  "flags": {
+    "redWhenOverLimit": 1.0,
+    "greenWhenAtMostRatio": 0.85,
+    "appliesTo": "categories with a limit > 0"
+  }
+}

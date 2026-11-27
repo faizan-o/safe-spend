@@ -1,0 +1,7 @@
+{
+  "projectId": "safespend-backend",
+  "firebaseApiKey": "PASTE the apiKey from lib/firebase_options.dart",
+  "geminiApiKey": "OPTIONAL: written straight into the Gemini node, so no Gemini credential is needed",
+  "googleCredentialId": "OPTIONAL: id of your n8n Google service-account credential",
+  "geminiCredentialId": "OPTIONAL: only if you do not use geminiApiKey"
+}

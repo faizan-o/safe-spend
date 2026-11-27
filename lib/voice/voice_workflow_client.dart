@@ -25,11 +25,11 @@ abstract class VoiceWorkflowClient {
 }
 
 /// The client used by the app: the real n8n webhook when its address was
-/// given with --dart-define=N8N_WEBHOOK_URL=..., otherwise the dummy.
+/// given with --dart-define=N8N_BASE_URL=..., otherwise the dummy.
 VoiceWorkflowClient createVoiceWorkflowClient(AuthService auth) {
-  if (VoiceConfig.hasWebhook) {
+  if (VoiceConfig.hasBackend) {
     return N8nVoiceWorkflowClient(
-      webhookUrl: VoiceConfig.webhookUrl,
+      webhookUrl: VoiceConfig.voiceUrl,
       idToken: auth.getIdToken,
     );
   }
@@ -57,37 +57,69 @@ class N8nVoiceWorkflowClient implements VoiceWorkflowClient {
 
   @override
   Future<VoiceWorkflowResult> submit(VoiceWorkflowRequest request) async {
-    final token = await idToken?.call();
-    final http.Response response;
+    final decoded = await postWorkflowJson(
+      client: _client,
+      url: webhookUrl,
+      body: request.toJson(),
+      requestId: request.clientRequestId,
+      token: await idToken?.call(),
+      timeout: timeout,
+    );
     try {
-      response = await _client
-          .post(
-            Uri.parse(webhookUrl),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              'X-Request-Id': request.clientRequestId,
-              if (token != null) 'Authorization': 'Bearer $token',
-            },
-            body: jsonEncode(request.toJson()),
-          )
-          .timeout(timeout);
-    } on TimeoutException {
-      throw const VoiceWorkflowException('The workflow took too long to answer. Please try again.');
-    } on http.ClientException {
-      throw const VoiceWorkflowException('Could not reach the workflow. Check your connection.');
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw VoiceWorkflowException('The workflow returned an error (${response.statusCode}).');
-    }
-
-    try {
-      return VoiceWorkflowResult.fromDecoded(jsonDecode(utf8.decode(response.bodyBytes)));
+      return VoiceWorkflowResult.fromDecoded(decoded);
     } on FormatException {
       throw const VoiceWorkflowException('The workflow answered in a format the app does not understand.');
     }
   }
+}
+
+/// Posts [body] as JSON to an n8n webhook and returns the decoded JSON answer.
+/// Every failure becomes a [VoiceWorkflowException] with a message the user
+/// can read. The workflow's own error text is used for 4xx answers.
+Future<Object?> postWorkflowJson({
+  required http.Client client,
+  required String url,
+  required Map<String, dynamic> body,
+  required String requestId,
+  String? token,
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final http.Response response;
+  try {
+    response = await client
+        .post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Request-Id': requestId,
+            if (token != null) 'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(timeout);
+  } on TimeoutException {
+    throw const VoiceWorkflowException('The workflow took too long to answer. Please try again.');
+  } on http.ClientException {
+    throw const VoiceWorkflowException('Could not reach the workflow. Check your connection.');
+  }
+
+  Object? decoded;
+  try {
+    decoded = jsonDecode(utf8.decode(response.bodyBytes));
+  } on FormatException {
+    decoded = null;
+  }
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    // The workflows answer errors as {"message": "..."} that are written for users.
+    final message = decoded is Map && decoded['message'] is String ? decoded['message'] as String : null;
+    throw VoiceWorkflowException(message ?? 'The workflow returned an error (${response.statusCode}).');
+  }
+  if (decoded == null) {
+    throw const VoiceWorkflowException('The workflow answered in a format the app does not understand.');
+  }
+  return decoded;
 }
 
 /// Stands in for the n8n workflow until it exists. It "understands" a sentence

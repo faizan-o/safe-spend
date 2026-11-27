@@ -8,6 +8,7 @@ import '../models/money.dart';
 import '../models/monthly_budget.dart';
 import '../utils/category_icons.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 
 /// Where the user declares the month's budget: income, fixed bills, a savings
 /// goal and a limit for each everyday category.
@@ -127,7 +128,7 @@ class _BudgetSetupScreenState extends State<BudgetSetupScreen> {
     return Scaffold(
       appBar: AppBar(title: Text('Budget for ${monthTitle(widget.monthKey)}')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        padding: Responsive.listPadding(context, maxWidth: 640, side: 20, top: 8),
         children: [
           _MoneyField(
             controller: _income,

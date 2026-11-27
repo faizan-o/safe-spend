@@ -6,6 +6,8 @@ import '../models/category.dart';
 import '../models/expense.dart';
 import '../models/money.dart';
 import '../models/user_profile.dart';
+import 'receipt_client.dart';
+import 'receipt_vault.dart';
 import 'speech_recognizer.dart';
 import 'voice_models.dart';
 import 'voice_workflow_client.dart';
@@ -46,15 +48,26 @@ class VoiceController extends ChangeNotifier {
     required this.recognizer,
     required this.workflow,
     required this.saveExpense,
+    ReceiptClient? receipts,
+    this.vault,
     DateTime Function()? clock,
-  }) : _now = clock ?? DateTime.now;
+  })  : receipts = receipts ?? DummyReceiptClient(),
+        _now = clock ?? DateTime.now;
 
   final String userId;
   final SpeechRecognizer recognizer;
   final VoiceWorkflowClient workflow;
 
-  /// Saves the confirmed expense (the app passes the Firestore repository).
-  final Future<void> Function(Expense expense) saveExpense;
+  /// Reads receipt photos.
+  final ReceiptClient receipts;
+
+  /// Keeps receipt pictures and their records (Firestore).
+  /// Null in tests and in demo mode.
+  final ReceiptVault? vault;
+
+  /// Saves the confirmed expense and returns its id (the app passes the
+  /// Firestore repository).
+  final Future<String> Function(Expense expense) saveExpense;
   final DateTime Function() _now;
 
   /// Microphone loudness from 0 to 1, for the pulsing ring around the button.
@@ -301,16 +314,11 @@ class VoiceController extends ChangeNotifier {
 
   // ---- Workflow ------------------------------------------------------------
 
-  Future<void> _submit(String text) async {
-    final token = ++_requestCounter;
-    _clearOutput();
-    transcript = text;
-    state = VoiceState.sending;
-    _notify();
-
-    try {
-      final now = _now();
-      final answer = await workflow.submit(VoiceWorkflowRequest(
+  Future<void> _submit(String text) {
+    return _run(
+      shown: text,
+      source: ExpenseSource.voice,
+      call: (now) => workflow.submit(VoiceWorkflowRequest(
         clientRequestId: 'req-${now.microsecondsSinceEpoch}',
         userId: userId,
         transcript: text,
@@ -319,18 +327,99 @@ class VoiceController extends ChangeNotifier {
         currencyCode: currencyCode,
         currencySymbol: symbol,
         categories: categories,
-      ));
+      )),
+    );
+  }
+
+  /// Sends a photo (or PDF) of a receipt through the receipt workflow.
+  Future<void> submitReceipt(Uint8List bytes, String mimeType) async {
+    if (state == VoiceState.sending || state == VoiceState.initializing) return;
+    if (state == VoiceState.listening) {
+      _statusTimer?.cancel();
+      try {
+        await recognizer.cancel();
+      } catch (_) {}
+    }
+    _clearOutput();
+    transcript = 'Saving your picture…';
+    state = VoiceState.sending;
+    final myRequest = ++_requestCounter;
+    _notify();
+
+    // Keep the picture first, so the receipt is in the list even if reading it fails.
+    String? receiptId;
+    final store = vault;
+    if (store != null) {
+      try {
+        receiptId = await store
+            .store(bytes, mimeType, _now())
+            .timeout(const Duration(seconds: 30));
+      } catch (_) {
+        receiptId = null; // still read it; it just will not appear in Receipts
+      }
+    }
+    if (_disposed || myRequest != _requestCounter) return;
+
+    await _run(
+      shown: 'Reading your receipt…',
+      source: ExpenseSource.receipt,
+      receiptId: receiptId,
+      call: (now) => receipts.submit(ReceiptRequest(
+        clientRequestId: 'rcpt-${now.microsecondsSinceEpoch}',
+        userId: userId,
+        bytes: bytes,
+        mimeType: mimeType,
+        sentAt: now,
+        receiptId: receiptId,
+      )),
+    );
+  }
+
+  Future<void> _run({
+    required String shown,
+    required ExpenseSource source,
+    required Future<VoiceWorkflowResult> Function(DateTime now) call,
+    String? receiptId,
+  }) async {
+    final token = ++_requestCounter;
+    _clearOutput();
+    transcript = shown;
+    state = VoiceState.sending;
+    _notify();
+
+    try {
+      final answer = await call(_now());
       if (_disposed || token != _requestCounter) return; // closed or cancelled while waiting
+      final spoken = source == ExpenseSource.voice ? shown : null;
+      final built = _buildDraft(answer, spoken, source, receiptId);
+      if (receiptId != null) _record(vault?.recordResult(receiptId, answer, draft: built));
+
+      if (answer.saved && answer.status == VoiceWorkflowStatus.parsed && answer.expense != null) {
+        // The workflow already stored it and updated the month totals.
+        final parsed = answer.expense!;
+        final minor = Money.fromMajor(parsed.amount);
+        final name = built?.categoryName ?? parsed.categoryName ?? 'Expense';
+        _backToReady(
+          notice: '${answer.duplicate ? 'Already saved' : 'Saved'} '
+              '${Money.format(minor, symbol: symbol, showDecimals: minor % 100 != 0)} · $name',
+        );
+        return;
+      }
       result = answer;
-      draft = _buildDraft(answer, text);
+      draft = built;
       state = VoiceState.result;
     } on VoiceWorkflowException catch (error) {
+      if (receiptId != null) _record(vault?.markFailed(receiptId, error.message));
       if (_disposed || token != _requestCounter) return;
-      _backToReady(error: error.message, keepTranscript: true);
+      _backToReady(error: error.message, keepTranscript: source == ExpenseSource.voice);
       return;
     } catch (_) {
+      if (receiptId != null) _record(vault?.markFailed(receiptId, 'Something went wrong while reading it.'));
       if (_disposed || token != _requestCounter) return;
-      _backToReady(error: 'Something went wrong while processing that. Please try again.', keepTranscript: true);
+      _backToReady(
+        error: 'Something went wrong while processing that. Please try again.',
+        keepTranscript: source == ExpenseSource.voice,
+      );
       return;
     }
     _notify();
@@ -345,7 +434,7 @@ class VoiceController extends ChangeNotifier {
 
   /// Turns the workflow's answer into an expense that can be saved, or null
   /// when the answer cannot be used.
-  Expense? _buildDraft(VoiceWorkflowResult answer, String spoken) {
+  Expense? _buildDraft(VoiceWorkflowResult answer, String? spoken, ExpenseSource source, [String? receiptId]) {
     final parsed = answer.expense;
     if (answer.status != VoiceWorkflowStatus.parsed || parsed == null) return null;
 
@@ -362,8 +451,19 @@ class VoiceController extends ChangeNotifier {
       categoryKind: category.kind,
       note: parsed.note ?? '',
       date: _resolveDate(parsed),
-      source: ExpenseSource.voice,
+      source: source,
       transcript: spoken,
+      merchant: parsed.merchant,
+      confidence: answer.confidence,
+      receiptId: receiptId,
+      items: [
+        for (final item in parsed.items)
+          ExpenseItem(
+            description: item.description,
+            amount: Money.fromMajor(item.amount),
+            quantity: item.quantity,
+          ),
+      ],
     );
   }
 
@@ -409,11 +509,25 @@ class VoiceController extends ChangeNotifier {
 
     // Saved on the device at once and confirmed by the server later, so the
     // screen moves on without waiting (the phone may be offline).
-    saveExpense(expense).then((_) {}, onError: (Object _) {
+    saveExpense(expense).then((id) {
+      linkSaved(expense, id);
+    }, onError: (Object _) {
       errorMessage = 'Could not save the expense. Check your connection.';
       _notify();
     });
     markSaved(expense);
+  }
+
+  /// Marks the receipt behind [expense] as saved. Called with the new expense
+  /// id after the app saved it (here, or from the edit sheet).
+  void linkSaved(Expense expense, String expenseId) {
+    final id = expense.receiptId;
+    if (id != null) _record(vault?.markSaved(id, expenseId, expense));
+  }
+
+  /// Runs a receipt bookkeeping write without letting its failure matter.
+  void _record(Future<void>? write) {
+    write?.then((_) {}, onError: (Object _) {});
   }
 
   /// Call when the expense was saved some other way (for example after the
@@ -437,6 +551,8 @@ class VoiceController extends ChangeNotifier {
       cancelSending();
       return;
     }
+    final receiptId = draft?.receiptId;
+    if (receiptId != null) _record(vault?.markDiscarded(receiptId));
     _clearOutput();
     transcript = '';
     state = VoiceState.ready;

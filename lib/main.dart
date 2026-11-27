@@ -1,5 +1,7 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
+
 import 'package:flutter/material.dart';
 
 import 'data/app_database.dart';
@@ -8,12 +10,14 @@ import 'screens/auth_gate.dart';
 import 'services/auth_service.dart';
 import 'services/firebase_auth_service.dart';
 import 'services/local_auth_service.dart';
+import 'settings/theme_controller.dart';
 import 'theme.dart';
 
 typedef _Backend = ({AuthService auth, AppDatabase? database});
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await themeController.load();
   final backend = await _startBackend();
   runApp(SafeSpendApp(auth: backend.auth, database: backend.database));
 }
@@ -43,12 +47,31 @@ class SafeSpendApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: AppConfig.appName,
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
-      home: AuthGate(auth: auth, database: database),
+    return ListenableBuilder(
+      listenable: themeController,
+      builder: (context, _) => MaterialApp(
+        title: AppConfig.appName,
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
+        themeMode: themeController.mode,
+        scrollBehavior: const _AppScrollBehavior(),
+        home: AuthGate(auth: auth, database: database),
+      ),
     );
   }
+}
+
+/// Lets lists be dragged with a mouse or trackpad too (the default only
+/// allows touch), so the web and desktop builds feel the same as the phone.
+class _AppScrollBehavior extends MaterialScrollBehavior {
+  const _AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
 }

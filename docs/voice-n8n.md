@@ -1,58 +1,62 @@
-# Voice input and the n8n workflow
+# Connecting the app to the n8n workflows
 
-Flow: **speak → speech-to-text (on device) → n8n webhook → review card → app saves the expense.**
-n8n only *parses*; the app writes to Firestore, so monthly stats stay consistent.
+The app talks to three n8n workflows (see `n8n/README.md` to import and set them up):
 
-## Running
+| Feature | App code | Webhook |
+| --- | --- | --- |
+| Voice / typed expense | `lib/voice/voice_workflow_client.dart` | `POST <base>/safespend/voice` |
+| Receipt photo | `lib/voice/receipt_client.dart` | `POST <base>/safespend/receipt` |
+| Monthly report | `lib/report/report_client.dart` | `POST <base>/safespend/report` |
 
-- Without a webhook the built-in **dummy** answers (test mode, shown as a chip on the card).
-- With n8n: `flutter run --dart-define=N8N_WEBHOOK_URL=https://your-n8n/webhook/safespend-voice`
-- The user's Firebase ID token is sent as `Authorization: Bearer <token>`. The workflow should verify it
-  (Google's `securetoken` public keys, audience = your Firebase project ID) and that `userId` matches the token's `sub`.
+## Turning it on
 
-## Request (POST, JSON)
+Run or build the app with the base of your n8n **production** webhook URL (the part before `/safespend/...`):
 
-```json
-{
-  "clientRequestId": "u1-1732631400000-1",
-  "userId": "u1",
-  "source": "voice",
-  "transcript": "spent 500 on lunch yesterday",
-  "locale": "en_US",
-  "sentAt": "2026-11-26T09:30:00.000Z",
-  "localDate": "2026-11-26",
-  "timeZoneOffsetMinutes": 300,
-  "currency": { "code": "PKR", "symbol": "Rs." },
-  "categories": [ { "id": "food", "name": "Food", "kind": "flexible" } ]
-}
+```bash
+flutter run --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook
+flutter build apk --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook
 ```
 
-## Response (JSON; a one-item list is also accepted)
+Without `N8N_BASE_URL` the app uses built-in dummy workflows (a "Test mode" chip is shown) so you can try the screens;
+month reports are then unavailable. Every call carries the signed-in user's Firebase ID token
+(`Authorization: Bearer ...`), which the workflows verify.
 
-```json
-{
-  "status": "parsed",
-  "message": "Rs. 500 on Food",
-  "expense": { "amount": 500, "categoryId": "food", "categoryName": "Food",
-               "note": "lunch", "date": "2026-11-25" },
-  "confidence": 0.93,
-  "workflow": "n8n"
-}
-```
+## What the app does with an answer
 
-- `status`: `parsed` | `needs_clarification` | `failed`.
-- `amount` is in **rupees** (the app converts to paisa). `categoryId` must be one of the sent ids.
-- `date`: `yyyy-MM-dd` (day only) or full ISO time; omitted = now. Future dates are clamped to now.
+- `saved: true` — n8n already stored the expense and updated the month totals. The app shows "Saved ..." and does **not** save again.
+- `needsReview: true` — n8n was not sure and wrote nothing. The app shows the review card (with the reason), and the user
+  saves, edits or discards. The app then writes it itself (`source: voice` or `receipt`).
+- `needs_clarification` / `failed` — a message and a "Try again" button.
+- Errors (offline, timeout, 401, 5xx) — a readable message; the typed box and manual "Add expense" always still work.
+
+## Using it
+
+- **Voice:** the app opens on the Voice tab. Tap the mic, speak, or type.
+- **Receipts:** "Scan a receipt" (Voice tab, or the button on the Receipts tab) takes a photo or picks one from the gallery (compressed to about 1800 px, JPEG).
+  The picture is compressed and kept in Firestore, and listed with its timestamp on the **Receipts** tab. On Android/iOS you can take a photo or upload one; on desktop and web you can only upload a file.
+- **Reports:** Dashboard menu → *Monthly report*. It shows the report n8n wrote to `monthSummaries/{monthKey}`, and
+  *Generate / Refresh report* asks n8n to rebuild it. n8n also creates last month's report for everyone on the 1st at 03:00.
 
 ## Platform setup
 
-**Android** (`AndroidManifest.xml`):
+**Android** (`android/app/src/main/AndroidManifest.xml`, inside `<manifest>`):
 ```xml
 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 <uses-permission android:name="android.permission.INTERNET"/>
 <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
 <queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>
 ```
-**iOS** (`Info.plist`): `NSSpeechRecognitionUsageDescription` and `NSMicrophoneUsageDescription`.
+The camera and gallery need no extra Android permission (image_picker uses the system picker/camera app).
 
-Emulators often lack a speech service; use the typed box or example chips there.
+**iOS** (`ios/Runner/Info.plist`):
+```xml
+<key>NSSpeechRecognitionUsageDescription</key><string>SafeSpend turns what you say into an expense.</string>
+<key>NSMicrophoneUsageDescription</key><string>SafeSpend listens when you tap the microphone.</string>
+<key>NSCameraUsageDescription</key><string>SafeSpend reads receipts you photograph.</string>
+<key>NSPhotoLibraryUsageDescription</key><string>SafeSpend reads receipts you choose.</string>
+```
+Emulators often lack a speech service; use the typed box or the example chips there.
+
+## Contract
+
+The exact request/response JSON is in `n8n/README.md`.
