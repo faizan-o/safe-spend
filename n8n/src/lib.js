@@ -174,7 +174,7 @@ function geminiSchema(s) {
   }
   return out;
 }
-function geminiBody({ system, parts, schema, maxTokens, vision }) {
+function geminiBody({ system, parts, schema, maxTokens, vision, levelKey }) {
   const generationConfig = { responseMimeType: 'application/json', responseSchema: geminiSchema(schema), maxOutputTokens: maxTokens || 4096 };
   // Vision: read at full resolution. (Temperature and thinking are left at the model defaults, which newer Gemini models prefer.)
   if (vision) generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';

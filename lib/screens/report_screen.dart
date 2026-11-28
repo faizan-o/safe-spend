@@ -59,6 +59,46 @@ class _ReportScreenState extends State<ReportScreen> {
     });
   }
 
+  /// The month's numbers, read here with the user's own sign-in and sent to the workflow.
+  Future<Map<String, dynamic>> _collect(String month) async {
+    final repo = widget.data;
+    final expenses = await repo.expenses.getRange(
+      DateKeys.startOfMonth(month),
+      DateKeys.endOfMonthExclusive(month),
+    );
+    final budget = await repo.budgets.getBudget(month);
+    final stats = await repo.expenses.getStats(month);
+    final previous = await repo.expenses.getStats(_shift(month, -1));
+    return {
+      'currencySymbol': widget.symbol,
+      'budget': budget == null
+          ? null
+          : {
+              'income': budget.income,
+              'categories': [
+                for (final c in budget.categories)
+                  {'categoryId': c.categoryId, 'name': c.name, 'kind': c.kind.name, 'limit': c.limit},
+              ],
+            },
+      'stats': stats.expenseCount > 0 ? stats.toExpenseMap() : null,
+      'prevStats': previous.expenseCount > 0 ? previous.toExpenseMap() : null,
+      'expenses': [
+        for (final e in expenses.take(2000))
+          {
+            'amount': e.amount,
+            'categoryId': e.categoryId,
+            'categoryName': e.categoryName,
+            'categoryKind': e.categoryKind.name,
+            'note': e.note,
+            if (e.merchant != null) 'merchant': e.merchant,
+            'dayKey': e.dayKey,
+            'monthKey': e.monthKey,
+            'source': e.source.name,
+          },
+      ],
+    };
+  }
+
   Future<void> _generate() async {
     setState(() {
       _busy = true;
@@ -67,14 +107,21 @@ class _ReportScreenState extends State<ReportScreen> {
     });
     final month = _monthKey;
     try {
-      final status = await _client.generate(month);
+      final status = await _client.generate(month, data: await _collect(month));
+      if (!mounted) return;
+      final summary = _client.lastSummary;
+      if (status == 'generated' && summary != null) {
+        // The workflow only writes the report; the app saves it under its own account.
+        await widget.data.summaries
+            .saveSummary(MonthSummary.fromMap(month, summary))
+            .timeout(const Duration(seconds: 20));
+      }
       if (!mounted) return;
       if (status == 'skipped') {
         final reason = _client.lastReason ?? '';
         final String text;
         if (reason == 'no_data') {
-          text = 'The report service found no expenses or budget for ${monthTitle(month)}. '
-              'If you can see them in the app, check that the n8n workflow uses the same Firebase project.';
+          text = 'There are no expenses or budget for ${monthTitle(month)} yet. Add some (or the sample data in Settings) and try again.';
         } else if (reason == 'already_generated') {
           text = 'A report for ${monthTitle(month)} already exists.';
         } else if (reason.isNotEmpty) {

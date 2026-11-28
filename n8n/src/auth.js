@@ -18,7 +18,7 @@ if (KIND === 'report') {
   const current = ctx.localDate.slice(0, 7);
   const monthKey = body.monthKey === undefined ? current : body.monthKey;
   if (!isMonthKey(monthKey) || monthKey > current) return out(fail(400, 'monthKey must look like 2026-11 and not be in the future.', WORKFLOW));
-  return out({ ok: true, items: [{ uid, monthKey, force: body.force !== false, via: 'webhook', partial: monthKey === current, localDate: ctx.localDate }] });
+  return out({ ok: true, items: [{ uid, monthKey, force: body.force !== false, via: 'webhook', partial: monthKey === current, localDate: ctx.localDate, ...(body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { data: body.data } : {}) }] });
 }
 
 const requestId = cleanText(body.clientRequestId, 100) || `auto-${uid.slice(0, 8)}-${Date.now()}`;

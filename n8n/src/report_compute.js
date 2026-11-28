@@ -1,21 +1,35 @@
 // Works out every number of the month deterministically (same rules as the app), then prepares the AI request.
 /* @@LIB@@ */
 const cfg = cfgOf();
-const u = $('Loop users').first().json;
-const bodyOf = (name) => { const r = $(name).first().json; return r.statusCode === 200 ? r.body : null; };
+const u = $('Current user').first().json;
+const bodyOf = (name) => { try { const r = $(name).first().json; return r.statusCode === 200 ? r.body : null; } catch (e) { return null; } };
 const skip = (reason) => [{ json: { skip: true, reason, uid: u.uid, monthKey: u.monthKey } }];
 try {
-  const profile = fsDecodeDoc(bodyOf('Get profile')) || {};
-  const budget = fsDecodeDoc(bodyOf('Get budget'));
-  const stored = fsDecodeDoc(bodyOf('Get stats'));
-  const prevStats = fsDecodeDoc(bodyOf('Get previous stats'));
-  const symbol = profile.currencySymbol || 'Rs.';
+  // Two ways in: the app sends the month's data itself (u.data, plain JSON), or the workflow reads Firestore (monthly schedule).
+  const sent = u.data && typeof u.data === 'object' ? u.data : null;
+  const profile = sent ? { currencySymbol: sent.currencySymbol } : (fsDecodeDoc(bodyOf('Get profile')) || {});
+  const budget = sent ? (sent.budget && typeof sent.budget === 'object' ? sent.budget : null) : fsDecodeDoc(bodyOf('Get budget'));
+  const stored = sent ? (sent.stats && typeof sent.stats === 'object' ? sent.stats : null) : fsDecodeDoc(bodyOf('Get stats'));
+  const prevStats = sent ? (sent.prevStats && typeof sent.prevStats === 'object' ? sent.prevStats : null) : fsDecodeDoc(bodyOf('Get previous stats'));
+  const symbol = String(profile.currencySymbol || 'Rs.').slice(0, 8);
   const monthKey = u.monthKey, days = daysInMonth(monthKey);
 
   const expenses = [];
-  const q = $input.first().json;
-  for (const row of q.statusCode === 200 && Array.isArray(q.body) ? q.body : []) {
-    if (row.document && row.document.fields) expenses.push({ id: fsIdOf(row.document), ...fsDecodeFields(row.document.fields) });
+  if (sent) {
+    for (const e of (Array.isArray(sent.expenses) ? sent.expenses : []).slice(0, 2000)) {
+      if (e && typeof e === 'object' && String(e.monthKey || monthKey) === monthKey) expenses.push(e);
+    }
+  } else {
+    const q = $input.first().json;
+    // A failed read must not look like "no data": say what Firestore answered.
+    if (q.statusCode !== 200) {
+      const m = q.body && (Array.isArray(q.body) ? q.body[0] : q.body);
+      const msg = m && m.error && m.error.message ? m.error.message : '';
+      return skip(`could not read expenses (HTTP ${q.statusCode}) ${String(msg).slice(0, 140)} - check the Config projectId and the Google service account credential`);
+    }
+    for (const row of Array.isArray(q.body) ? q.body : []) {
+      if (row.document && row.document.fields) expenses.push({ id: fsIdOf(row.document), ...fsDecodeFields(row.document.fields) });
+    }
   }
   if (!expenses.length && !budget) return skip('no_data');
 

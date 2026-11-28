@@ -154,15 +154,20 @@ def report_flow():
                               "paginationCompleteWhen": "other", "completeExpression": "={{ !$response.body.nextPageToken }}", "limitPagesFetched": False}}}}, (660, 200), 4.2, credentials=GOOGLE)
     ui = codenode(f, "Users to items", code("report_users.js"), (880, 200))
     loop = f.add("Loop users", "n8n-nodes-base.splitInBatches", {"batchSize": 1, "options": {}}, (1540, 300), 3)
-    U = "/users/{{ $('Loop users').first().json.uid }}"
+    # The item that arrives here is the user being processed. Later nodes read it from this node
+    # (an explicit copy of $input) instead of reaching back into the Loop node.
+    cu = codenode(f, "Current user", "return $input.all().slice(0, 1).map((i) => ({ json: { ...i.json } }));", (1650, 300))
+    U = "/users/{{ $('Current user').first().json.uid }}"
     g1 = fs_get(f, "Get profile", U, (1760, 300))
-    g2 = fs_get(f, "Get budget", U + "/budgets/{{ $('Loop users').first().json.monthKey }}", (1980, 300))
-    g3 = fs_get(f, "Get stats", U + "/monthStats/{{ $('Loop users').first().json.monthKey }}", (2200, 300))
-    g4 = fs_get(f, "Get previous stats", U + "/monthStats/{{ $('Loop users').first().json.prevMonthKey }}", (2420, 300))
-    q = fs_post(f, "Query expenses", U + ":runQuery", "={{ JSON.stringify({ structuredQuery: { from: [{ collectionId: 'expenses' }], where: { fieldFilter: { field: { fieldPath: 'monthKey' }, op: 'EQUAL', value: { stringValue: $('Loop users').first().json.monthKey } } }, limit: 2000 } }) }}", (2640, 300))
+    g2 = fs_get(f, "Get budget", U + "/budgets/{{ $('Current user').first().json.monthKey }}", (1980, 300))
+    g3 = fs_get(f, "Get stats", U + "/monthStats/{{ $('Current user').first().json.monthKey }}", (2200, 300))
+    g4 = fs_get(f, "Get previous stats", U + "/monthStats/{{ $('Current user').first().json.prevMonthKey }}", (2420, 300))
+    q = fs_post(f, "Query expenses", U + ":runQuery", "={{ JSON.stringify({ structuredQuery: { from: [{ collectionId: 'expenses' }], where: { fieldFilter: { field: { fieldPath: 'monthKey' }, op: 'EQUAL', value: { stringValue: $('Current user').first().json.monthKey } } }, limit: 2000 } }) }}", (2640, 300))
+    cd = if_node(f, "App sent data?", "={{ !!$('Current user').first().json.data }}", (1650, 100))
     comp = codenode(f, "Compute report", code("report_compute.js"), (2860, 300))
     sk = if_node(f, "Skip?", "={{ $json.skip }}", (3080, 300))
     cl = gemini(f, (3300, 400)); bs = codenode(f, "Build summary", code("report_build.js"), (3520, 400))
+    sv = if_node(f, "Save in Firestore?", "={{ !$('Current user').first().json.data }}", (3630, 400))
     cm = fs_post(f, "Save summary", ":commit", "={{ JSON.stringify($('Build summary').first().json.commit) }}", (3740, 400))
     res = codenode(f, "Result", code("report_result.js"), (3960, 300))
     via = if_node(f, "Answer the app?", "={{ $json.via === 'webhook' }}", (4180, 300)); rs = respond(f, "Respond", (4400, 200))
@@ -170,8 +175,8 @@ def report_flow():
     f.link(isw, v, 0); f.link(isw, lu, 1)
     f.chain(v, a, ok); f.link(ok, ex, 0); f.link(ok, err, 1); f.link(ex, loop)
     f.chain(lu, ui); f.link(ui, loop)
-    f.link(loop, g1, 1); f.chain(g1, g2, g3, g4, q, comp, sk)
-    f.link(sk, res, 0); f.link(sk, cl, 1); f.chain(cl, bs, cm); f.link(cm, res)
+    f.link(loop, cu, 1); f.link(cu, cd); f.link(cd, comp, 0); f.link(cd, g1, 1); f.chain(g1, g2, g3, g4, q, comp, sk)
+    f.link(sk, res, 0); f.link(sk, cl, 1); f.chain(cl, bs, sv); f.link(sv, cm, 0); f.link(sv, res, 1); f.link(cm, res)
     f.link(res, via); f.link(via, rs, 0); f.link(via, loop, 1); f.link(rs, loop)
     return f
 

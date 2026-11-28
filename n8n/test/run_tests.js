@@ -362,6 +362,18 @@ test('report: on-demand month is computed with the app\'s rules and saved', () =
   const facts = r.calls.find((c) => c.name === 'Gemini').body.contents[0].parts[0].text; assert(facts.includes('"totalSpent":46000'));
   const q = r.calls.find((c) => c.name === 'Query expenses').body.structuredQuery.where.fieldFilter; assert.strictEqual(q.value.stringValue, month);
 });
+test('report: data sent by the app is used and nothing is read from or saved to Firestore', () => {
+  const month = monthOf(-1); let touched = 0;
+  const fail = () => { touched++; return { statusCode: 403, body: { error: { message: 'no' } } }; };
+  const data = { currencySymbol: 'Rs.', budget: { income: 6000000, categories: [{ categoryId: 'food', name: 'Food', kind: 'flexible', limit: 1000000 }] },
+    stats: null, prevStats: { spentByCategory: { food: 900000 } },
+    expenses: [{ amount: 1300000, categoryId: 'food', categoryName: 'Food', categoryKind: 'flexible', dayKey: `${month}-05`, monthKey: month, source: 'manual', note: '' }] };
+  const r = makeRun(report, reportMocks(month, { 'Get profile': fail, 'Get budget': fail, 'Get stats': fail, 'Get previous stats': fail, 'Query expenses': fail, 'Save summary': fail }), 'Webhook', webhookItem({ monthKey: month, data }));
+  const b = r.responses[0].body; assert.strictEqual(b.status, 'generated'); assert.strictEqual(touched, 0);
+  assert.strictEqual(b.summary.totalSpent, 1300000); assert.strictEqual(b.summary.report.generatedBy, 'n8n');
+  const none = makeRun(report, reportMocks(month), 'Webhook', webhookItem({ monthKey: month, data: { currencySymbol: 'Rs.', expenses: [] } }));
+  assert.strictEqual(none.responses[0].body.status, 'skipped'); assert.strictEqual(none.responses[0].body.reason, 'no_data');
+});
 test('report: falls back to a rules-based report when the AI is down', () => {
   const month = monthOf(-1);
   const r = makeRun(report, reportMocks(month, { Gemini: () => ({ statusCode: 500, body: {} }) }), 'Webhook', webhookItem({ monthKey: month }));

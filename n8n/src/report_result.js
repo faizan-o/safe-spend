@@ -1,9 +1,10 @@
 // One result per user, whichever way the run ended.
 /* @@LIB@@ */
-const u = $('Loop users').first().json;
+const u = $('Current user').first().json;
 const j = $input.first().json;
 let response;
 if (j.skip) response = { status: 'skipped', monthKey: j.monthKey || u.monthKey, reason: j.reason };
+else if (!j.statusCode && j.summary) response = { status: 'generated', monthKey: u.monthKey, statsDrift: !!j.statsDrift, summary: j.summary }; // app-supplied data: the app saves it
 else {
   const built = $('Build summary').first().json;
   if (j.statusCode === 200) response = { status: 'generated', monthKey: u.monthKey, statsDrift: !!built.statsDrift, summary: built.summary };
