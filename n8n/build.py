@@ -60,7 +60,7 @@ FS = "=https://firestore.googleapis.com/v1/projects/{{ $('Config').first().json.
 
 def config_node(f, pos, note):
     vals = [("projectId", _LOCAL.get("projectId") or "YOUR-FIREBASE-PROJECT-ID", "string"), ("firebaseApiKey", _LOCAL.get("firebaseApiKey") or "YOUR-FIREBASE-WEB-API-KEY", "string"),
-            ("model", "gemini-3.8-flash", "string"), ("fallbackModel", "gemini-flash-lite-latest", "string"), ("thinkingLevel", "low", "string"), ("voiceThinkingLevel", "minimal", "string"), ("voiceModel", "gemini-3.8-flash", "string"), ("autoSaveAudio", "false", "string"), ("autoSaveMinConfidence", 0.8, "number"),
+            ("model", "gemini-3.8-flash", "string"), ("fallbackModel", "gemini-flash-lite-latest", "string"), ("thinkingLevel", "low", "string"), ("voiceThinkingLevel", "low", "string"), ("voiceModel", "gemini-3.8-flash", "string"), ("autoSaveAudio", "false", "string"), ("autoSaveMinConfidence", 0.8, "number"),
             ("maxAutoSaveRupees", 100000, "number"), ("maxAmountRupees", 10000000, "number"),
             ("maxImageBytes", 5000000, "number"), ("maxAudioBytes", 3000000, "number"), ("defaultUtcOffsetMinutes", 300, "number")]
     a = [{"id": sid(f.key, "cfg" + k), "name": k, "value": v, "type": t} for k, v, t in vals]
@@ -107,9 +107,9 @@ def gemini(f, pos, name="Gemini", model_key="model", body_expr="$json.aiBody", t
     if key:  # key written straight into the node: no credential to create or attach
         params.update({"authentication": "none", "sendHeaders": True,
                        "headerParameters": {"parameters": [{"name": "x-goog-api-key", "value": key}]}})
-        return f.add(name, "n8n-nodes-base.httpRequest", params, pos, 4.2)
+        return f.add(name, "n8n-nodes-base.httpRequest", params, pos, 4.2, onError="continueRegularOutput")
     params.update({"authentication": "genericCredentialType", "genericAuthType": "httpHeaderAuth"})
-    return f.add(name, "n8n-nodes-base.httpRequest", params, pos, 4.2, credentials=GEMINI)
+    return f.add(name, "n8n-nodes-base.httpRequest", params, pos, 4.2, credentials=GEMINI, onError="continueRegularOutput")
 
 def codenode(f, name, js, pos):
     return f.add(name, "n8n-nodes-base.code", {"jsCode": js}, pos, 2)
@@ -121,15 +121,15 @@ def expense_flow(kind, title, path, prompt_file, note):
     ok = if_node(f, "Authorized?", "={{ $json.ok }}", (880, 300)); err = respond(f, "Respond error", (1100, 440))
     pr = fs_get(f, "Load profile", "/users/{{ $('Auth').first().json.uid }}", (1100, 200))
     cats = fs_get(f, "Load categories", "/users/{{ $('Auth').first().json.uid }}/categories?pageSize=300", (1320, 200))
-    bp = codenode(f, "Build prompt", code(prompt_file), (1540, 200)); cl = gemini(f, (1760, 200), model_key="voiceModel" if kind == "voice" else "model", timeout=25000 if kind == "voice" else 55000)
+    bp = codenode(f, "Build prompt", code(prompt_file), (1540, 200)); cl = gemini(f, (1760, 200), model_key="voiceModel" if kind == "voice" else "model", timeout=40000 if kind == "voice" else 55000)
     it = codenode(f, "Interpret", code("interpret.js", __KIND__=kind), (1980, 200))
     sv = if_node(f, "Save it?", "={{ $json.shouldSave }}", (2200, 200))
     cm = fs_post(f, "Commit expense + month totals", ":commit", "={{ JSON.stringify($json.commit) }}", (2420, 100))
     fin = codenode(f, "Finalize", code("finalize_expense.js"), (2640, 100)); rs = respond(f, "Respond", (2860, 200))
     f.chain(w, c, v, a, ok); f.link(ok, err, 1)
     # If Gemini is overloaded (429/5xx), try the fallback model once before giving up.
-    busy = if_node(f, "Gemini busy?", "={{ [429, 500, 502, 503, 504].includes($json.statusCode) }}", (1870, 320))
-    cl2 = gemini(f, (1980, 420), "Gemini fallback", "fallbackModel", "$('Build prompt').first().json.aiBody", timeout=20000 if kind == "voice" else 30000)
+    busy = if_node(f, "Gemini busy?", "={{ !$json.statusCode || [429, 500, 502, 503, 504].includes($json.statusCode) }}", (1870, 320))
+    cl2 = gemini(f, (1980, 420), "Gemini fallback", "fallbackModel", "$('Build prompt').first().json.aiBody", timeout=15000 if kind == "voice" else 30000)
     if kind == "voice":
         f.link(ok, bp, 0)  # no Firestore reads: the app sends categories and currency
         f.nodes = [n for n in f.nodes if n["name"] not in (pr, cats)]

@@ -144,7 +144,7 @@ class _ReportScreenState extends State<ReportScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Monthly report')),
+      appBar: AppBar(title: const Text('Expense report')),
       body: SafeArea(
         child: Column(
           children: [

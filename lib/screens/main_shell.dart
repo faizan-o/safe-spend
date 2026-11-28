@@ -16,11 +16,12 @@ import 'bills_screen.dart';
 import 'dashboard_screen.dart';
 import 'debts_screen.dart';
 import 'receipts_screen.dart';
+import 'report_screen.dart';
 import 'settings_screen.dart';
 import 'voice_screen.dart';
 
-/// The signed-in app: five tabs, Voice (the first screen), Dashboard, Bills,
-/// Debts and Receipts. One shared controller feeds Dashboard, Bills and Debts.
+/// The signed-in app: six tabs, Voice (the first screen), Dashboard, Bills,
+/// Debts, Receipts and the Expense report. One shared controller feeds Dashboard, Bills and Debts.
 /// All stay alive when switching, so nothing reloads or is lost.
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -148,6 +149,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         BillsScreen(controller: _controller, data: widget.data),
         DebtsScreen(controller: _controller, data: widget.data),
         ReceiptsScreen(data: widget.data, onScan: _scan),
+        ListenableBuilder(
+          listenable: _controller,
+          builder: (context, _) => ReportScreen(
+            auth: widget.auth,
+            user: widget.user,
+            data: widget.data,
+            symbol: _controller.symbol,
+          ),
+        ),
       ],
     );
 
@@ -164,6 +174,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Bills'),
             NavigationDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: 'Debts'),
             NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Receipts'),
+            NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: 'Report'),
           ],
         ),
       );
@@ -232,6 +243,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 NavigationRailDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: Text('Bills')),
                 NavigationRailDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: Text('Debts')),
                 NavigationRailDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: Text('Receipts')),
+                NavigationRailDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: Text('Report')),
               ],
             ),
           ),

@@ -29,11 +29,10 @@ import '../widgets/opening_balance_sheet.dart';
 import 'bills_screen.dart';
 import 'budget_setup_screen.dart';
 import 'budgets_screen.dart';
-import 'report_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
 
-enum _MenuAction { budgets, transactions, report, settings, signOut }
+enum _MenuAction { budgets, transactions, settings, signOut }
 
 /// The main screen: the balance, today's safe-to-spend number, the budget at a
 /// glance, what is due soon, red and green flags, category progress and recent
@@ -216,19 +215,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _openReport() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ReportScreen(
-          auth: widget.auth,
-          user: widget.user,
-          data: widget.data,
-          symbol: _controller.symbol,
-        ),
-      ),
-    );
-  }
-
   void _openBills() {
     final open = widget.onOpenBills;
     if (open != null) {
@@ -281,8 +267,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _openBudgets();
                     case _MenuAction.transactions:
                       _openTransactions();
-                    case _MenuAction.report:
-                      _openReport();
                     case _MenuAction.settings:
                       openSettings(context, widget.auth, widget.user, data: widget.data);
                     case _MenuAction.signOut:
@@ -292,7 +276,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: _MenuAction.budgets, child: Text('Budgets')),
                   PopupMenuItem(value: _MenuAction.transactions, child: Text('All transactions')),
-                  PopupMenuItem(value: _MenuAction.report, child: Text('Monthly report')),
                   PopupMenuItem(value: _MenuAction.settings, child: Text('Settings')),
                   PopupMenuItem(value: _MenuAction.signOut, child: Text('Sign out')),
                 ],

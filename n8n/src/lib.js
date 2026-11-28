@@ -181,6 +181,8 @@ function geminiBody({ system, parts, schema, maxTokens, vision, levelKey }) {
   // Less thinking = much faster answers. Config field thinkingLevel: minimal | low | medium | high, or default to leave it to the model.
   let level = 'low';
   try { const c = cfgOf()[levelKey || 'thinkingLevel']; if (c !== undefined && c !== null && String(c).trim() !== '') level = String(c).trim().toLowerCase(); } catch (e) { /* keep low */ }
+  // Pro models do not accept "minimal" (only low/high), so use the nearest level instead of failing.
+  try { const c = cfgOf(); const m = String(levelKey === 'voiceThinkingLevel' ? (c.voiceModel || c.model) : c.model || '').toLowerCase(); if (level === 'minimal' && m.includes('pro')) level = 'low'; } catch (e) { /* ignore */ }
   if (level !== 'default') generationConfig.thinkingConfig = { thinkingLevel: level };
   return {
     systemInstruction: { parts: [{ text: system }] },
