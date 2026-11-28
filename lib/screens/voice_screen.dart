@@ -16,11 +16,23 @@ import '../voice/voice_controller.dart';
 import '../voice/voice_workflow_client.dart';
 import '../widgets/auth_widgets.dart';
 import 'settings_screen.dart';
+import '../models/category.dart';
+import '../models/date_keys.dart';
+import '../models/debt.dart';
+import '../models/income.dart';
+import '../models/money.dart';
+import '../models/recurring.dart';
+import '../widgets/bill_sheets.dart';
+import '../widgets/debt_sheets.dart';
 import '../widgets/expense_sheet.dart';
+import '../widgets/income_sheet.dart';
+import '../widgets/opening_balance_sheet.dart';
+import '../widgets/voice/voice_entry_card.dart';
+import '../voice/voice_models.dart';
 import '../widgets/voice/mic_button.dart';
 import '../widgets/voice/voice_result_card.dart';
 
-/// The first screen after signing in: tap the microphone, say what you spent,
+/// The first screen after signing in: tap the microphone, say an expense, income, bill or debt,
 /// and the words go through the workflow to become an expense.
 class VoiceScreen extends StatefulWidget {
   const VoiceScreen({
@@ -49,8 +61,9 @@ class VoiceScreen extends StatefulWidget {
 class VoiceScreenState extends State<VoiceScreen> {
   static const List<String> _examples = [
     'Spent 500 on lunch',
-    '1,200 for groceries yesterday',
-    'Uber 350',
+    'Received 50,000 salary',
+    'Rent 25,000 due on the 1st',
+    'Lent Ali 3,000',
   ];
 
   late final VoiceController _controller;
@@ -192,6 +205,119 @@ class VoiceScreenState extends State<VoiceScreen> {
     if (saved == true) _controller.markSaved();
   }
 
+  /// A day that was said (no time) becomes midday; today keeps the real time.
+  DateTime _when(DateTime? day) {
+    final now = DateTime.now();
+    if (day == null) return now;
+    if (DateKeys.ofDay(day) == DateKeys.ofDay(now)) return now;
+    return DateTime(day.year, day.month, day.day, 12);
+  }
+
+  /// Opens the matching form, filled in with what was said.
+  Future<void> _reviewEntry() async {
+    final entry = _controller.result?.entry;
+    if (entry == null) return;
+    final c = _controller;
+    final symbol = c.symbol;
+    final minor = Money.fromMajor(entry.amount);
+    final data = widget.data;
+    bool? saved;
+    var message = 'Saved.';
+
+    switch (entry.type) {
+      case VoiceEntryType.income:
+        saved = await showIncomeSheet(
+          context,
+          data: data,
+          symbol: symbol,
+          existing: Income(amount: minor, source: entry.source ?? '', note: entry.note ?? '', date: _when(entry.date)),
+        );
+        message = 'Income saved.';
+      case VoiceEntryType.bill:
+        final billDue = DateKeys.startOfDay(entry.dueDate ?? DateTime.now());
+        final dueDay = DateKeys.ofDay(billDue);
+        var frequency = Frequency.once;
+        for (final f in Frequency.values) {
+          if (f.name == entry.frequency) frequency = f;
+        }
+        ExpenseCategory? category;
+        for (final item in c.categories) {
+          if (item.id == entry.categoryId) category = item;
+        }
+        saved = await showRecurringSheet(
+          context,
+          data: data,
+          categories: c.categories,
+          symbol: symbol,
+          existing: RecurringItem(
+            title: entry.title ?? '',
+            amount: minor,
+            categoryId: category?.id,
+            categoryName: category?.name,
+            categoryKind: category?.kind,
+            frequency: frequency,
+            startDay: dueDay,
+            nextDueDay: dueDay,
+            note: entry.note ?? '',
+          ),
+        );
+        message = 'Bill saved.';
+      case VoiceEntryType.debt:
+      case VoiceEntryType.loan:
+        final lent = entry.type == VoiceEntryType.loan;
+        final debtDue = entry.dueDate;
+        saved = await showDebtSheet(
+          context,
+          data: data,
+          symbol: symbol,
+          existing: Debt(
+            direction: lent ? DebtDirection.owedToMe : DebtDirection.owedByMe,
+            person: entry.person ?? '',
+            amount: minor,
+            date: _when(entry.date),
+            dueDay: debtDue == null ? null : DateKeys.ofDay(debtDue),
+            note: entry.note ?? '',
+          ),
+        );
+        message = lent ? 'Loan saved.' : 'Debt saved.';
+      case VoiceEntryType.repayment:
+        final debts = await data.debts.watchAll().first;
+        if (!mounted) return;
+        final name = (entry.person ?? '').toLowerCase();
+        Debt? match;
+        for (final debt in debts) {
+          if (debt.isSettled || name.isEmpty) continue;
+          final other = debt.person.toLowerCase();
+          if (other.contains(name) || name.contains(other)) {
+            match = debt;
+            break;
+          }
+        }
+        if (match == null) {
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(SnackBar(
+              content: Text(name.isEmpty
+                  ? 'Say who it was, for example "Ali paid back 500".'
+                  : 'No open debt or loan with "${entry.person}". Add it first in the Debts tab.'),
+            ));
+          return;
+        }
+        saved = await showRepaymentSheet(context, data: data, debt: match, symbol: symbol, amount: minor);
+        message = 'Repayment saved.';
+      case VoiceEntryType.openingBalance:
+        saved = await showOpeningBalanceSheet(
+          context,
+          data: data,
+          symbol: symbol,
+          currentAmount: minor,
+          currentDay: DateKeys.startOfDay(entry.date ?? DateTime.now()),
+        );
+        message = 'Opening balance saved.';
+    }
+    if (saved == true) _controller.markEntrySaved(message);
+  }
+
   String get _name {
     final name = _profileName?.trim();
     if (name != null && name.isNotEmpty) return name.split(RegExp(r'\s+')).first;
@@ -310,7 +436,7 @@ class VoiceScreenState extends State<VoiceScreen> {
                   const SizedBox(height: 20),
                   _TranscriptBox(
                     text: c.transcript,
-                    placeholder: c.state == VoiceState.listening ? 'Say what you spent…' : '',
+                    placeholder: c.state == VoiceState.listening ? 'Say an expense, income, bill or debt…' : '',
                   ),
                   if (c.state == VoiceState.sending)
                     TextButton(onPressed: c.cancelSending, child: const Text('Cancel')),
@@ -330,7 +456,10 @@ class VoiceScreenState extends State<VoiceScreen> {
                 ],
                 if (c.state == VoiceState.result) ...[
                   const SizedBox(height: 20),
-                  VoiceResultCard(controller: c, onEdit: _editDraft),
+                  if (c.result?.entry != null)
+                    VoiceEntryCard(controller: c, entry: c.result!.entry!, onReview: _reviewEntry)
+                  else
+                    VoiceResultCard(controller: c, onEdit: _editDraft),
                 ],
                 if (c.state == VoiceState.ready) ...[
                   const SizedBox(height: 24),
@@ -397,7 +526,7 @@ class VoiceScreenState extends State<VoiceScreen> {
       case VoiceState.initializing:
         return 'Getting the microphone ready…';
       case VoiceState.ready:
-        return 'Tap the mic and say what you spent, or scan a receipt.';
+        return 'Tap the mic and say an expense, income, bill or loan, or scan a receipt.';
       case VoiceState.listening:
         return 'Listening. Try "500 on lunch".';
       case VoiceState.sending:

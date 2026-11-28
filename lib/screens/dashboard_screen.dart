@@ -20,6 +20,8 @@ import '../widgets/dashboard/income_tile.dart';
 import '../widgets/dashboard/month_overview_card.dart';
 import '../widgets/dashboard/safe_to_spend_card.dart';
 import '../widgets/dashboard/upcoming_dues_card.dart';
+import '../widgets/bill_sheets.dart';
+import '../widgets/debt_sheets.dart';
 import '../widgets/expense_sheet.dart';
 import '../widgets/form_bits.dart';
 import '../widgets/income_sheet.dart';
@@ -106,6 +108,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 _addIncome();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Add bill or due date'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                showRecurringSheet(
+                  context,
+                  data: widget.data,
+                  categories: _controller.categories,
+                  symbol: _controller.symbol,
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.handshake_outlined),
+              title: const Text('Add debt or loan'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                showDebtSheet(context, data: widget.data, symbol: _controller.symbol);
               },
             ),
           ],

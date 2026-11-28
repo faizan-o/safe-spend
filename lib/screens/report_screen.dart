@@ -70,7 +70,19 @@ class _ReportScreenState extends State<ReportScreen> {
       final status = await _client.generate(month);
       if (!mounted) return;
       if (status == 'skipped') {
-        setState(() => _info = 'There is nothing to report for ${monthTitle(month)} yet. Add some expenses first.');
+        final reason = _client.lastReason ?? '';
+        final String text;
+        if (reason == 'no_data') {
+          text = 'The report service found no expenses or budget for ${monthTitle(month)}. '
+              'If you can see them in the app, check that the n8n workflow uses the same Firebase project.';
+        } else if (reason == 'already_generated') {
+          text = 'A report for ${monthTitle(month)} already exists.';
+        } else if (reason.isNotEmpty) {
+          text = 'The report could not be built for ${monthTitle(month)}: $reason';
+        } else {
+          text = 'There is nothing to report for ${monthTitle(month)} yet. Add some expenses first.';
+        }
+        setState(() => _info = text);
       }
     } on VoiceWorkflowException catch (error) {
       if (mounted) setState(() => _error = error.message);

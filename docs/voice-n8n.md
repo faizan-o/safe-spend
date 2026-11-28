@@ -60,3 +60,15 @@ Emulators often lack a speech service; use the typed box or the example chips th
 ## Contract
 
 The exact request/response JSON is in `n8n/README.md`.
+
+## Voice for everything, not only expenses
+
+The voice workflow (`/webhook/safespend/voice`) now also understands income, bills, debts, loans, repayments and the opening balance. The model returns an `intent`; for anything other than `expense` the answer has no `expense` and carries an `entry` instead:
+
+```json
+{ "status": "parsed", "intent": "bill", "needsReview": true, "reviewReasons": ["other_entry"], "saved": false,
+  "entry": { "type": "bill", "amount": 25000, "title": "rent", "categoryId": "rent",
+             "frequency": "monthly", "dueDate": "2026-12-01", "note": null } }
+```
+
+`entry.type` is `income`, `bill`, `debt` (I borrowed), `loan` (I lent), `repayment` or `opening_balance`. Other fields: `source` (income), `title`, `frequency`, `dueDate`, `person`, `date`, `note`. Nothing is written by the workflow for these: the app opens the normal form pre-filled ("Review and save") and saves through its own repositories, so month totals and balances stay correct. Names and notes that were not actually said are dropped. After changing the workflow, re-import `safespend-voice-expense.json` in n8n.

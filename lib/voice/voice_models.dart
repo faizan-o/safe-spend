@@ -102,6 +102,81 @@ class ParsedExpense {
   final bool dateOnly;
 }
 
+/// What kind of entry the workflow found besides an expense.
+enum VoiceEntryType { income, bill, debt, loan, repayment, openingBalance }
+
+/// Something other than an expense that was said: income, a bill, a debt, a
+/// loan, a repayment or the opening balance. It is never saved by the
+/// workflow; the app shows it filled in for the user to check.
+class VoiceEntry {
+  const VoiceEntry({
+    required this.type,
+    required this.amount,
+    this.source,
+    this.title,
+    this.person,
+    this.note,
+    this.categoryId,
+    this.frequency,
+    this.date,
+    this.dueDate,
+  });
+
+  final VoiceEntryType type;
+
+  /// In rupees (not paisa).
+  final double amount;
+
+  /// Income: where the money came from.
+  final String? source;
+
+  /// Bill: its name.
+  final String? title;
+
+  /// Debt, loan or repayment: the other person.
+  final String? person;
+  final String? note;
+  final String? categoryId;
+
+  /// Bill: once, daily, weekly, monthly or yearly.
+  final String? frequency;
+
+  /// When it happened; null means today.
+  final DateTime? date;
+
+  /// Bills and debts: the due date, when one was said.
+  final DateTime? dueDate;
+
+  static VoiceEntry? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    final type = switch (map['type']) {
+      'income' => VoiceEntryType.income,
+      'bill' => VoiceEntryType.bill,
+      'debt' => VoiceEntryType.debt,
+      'loan' => VoiceEntryType.loan,
+      'repayment' => VoiceEntryType.repayment,
+      'opening_balance' => VoiceEntryType.openingBalance,
+      _ => null,
+    };
+    final amount = VoiceWorkflowResult._asDouble(map['amount']);
+    if (type == null || amount == null || amount <= 0) return null;
+    DateTime? day(Object? value) => value is String ? DateTime.tryParse(value.trim()) : null;
+    return VoiceEntry(
+      type: type,
+      amount: amount,
+      source: VoiceWorkflowResult._asString(map['source']),
+      title: VoiceWorkflowResult._asString(map['title']),
+      person: VoiceWorkflowResult._asString(map['person']),
+      note: VoiceWorkflowResult._asString(map['note']),
+      categoryId: VoiceWorkflowResult._asString(map['categoryId']),
+      frequency: VoiceWorkflowResult._asString(map['frequency']),
+      date: day(map['date']),
+      dueDate: day(map['dueDate']),
+    );
+  }
+}
+
 /// One receipt line as the workflow reports it (amount in rupees).
 class ParsedItem {
   const ParsedItem({required this.description, required this.amount, this.quantity = 1});
@@ -125,7 +200,12 @@ class VoiceWorkflowResult {
     this.reviewReasons = const [],
     this.expenseId,
     this.heard,
+    this.entry,
   });
+
+  /// Income, a bill, a debt, a loan, a repayment or the opening balance, when
+  /// that is what was said instead of an expense.
+  final VoiceEntry? entry;
 
   /// What the workflow heard, when it listened to a recording.
   final String? heard;
@@ -215,6 +295,7 @@ class VoiceWorkflowResult {
       workflow: _asString(json['workflow']),
       expenseId: _asString(json['expenseId']),
       heard: _asString(json['transcript']),
+      entry: VoiceEntry.fromJson(json['entry']),
       saved: json['saved'] == true,
       duplicate: json['duplicate'] == true,
       needsReview: json['needsReview'] == true,

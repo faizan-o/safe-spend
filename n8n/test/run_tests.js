@@ -154,6 +154,28 @@ test('voice: confident expense is saved atomically with month totals', () => {
   assert(stat(commit, 'spentByCategory.`food`')); assert(stat(commit, `spentByDay.\`${today.slice(8, 10)}\``));
   assert(r.calls.find((c) => c.name === 'Gemini').body.generationConfig.responseSchema.properties.categoryId.enum.join() === 'food,groceries,other,rent', 'only the categories sent by the app are offered');
 });
+test('voice: income, bills, debts and repayments are read but never written', () => {
+  const day = (n) => new Date(Date.now() + 300 * 60000 + n * 86400000).toISOString().slice(0, 10);
+  const cases = [
+    [{ intent: 'income', amount: 50000, source: 'salary', transcript: 'received 50000 salary' }, 'received 50000 salary', (e) => { assert.strictEqual(e.type, 'income'); assert.strictEqual(e.amount, 50000); assert.strictEqual(e.source, 'salary'); }],
+    [{ intent: 'bill', amount: 25000, title: 'rent', categoryId: 'rent', frequency: 'monthly', dueDate: day(10) }, 'rent 25000 monthly due soon', (e) => { assert.strictEqual(e.type, 'bill'); assert.strictEqual(e.title, 'rent'); assert.strictEqual(e.frequency, 'monthly'); assert.strictEqual(e.dueDate, day(10)); assert.strictEqual(e.categoryId, 'rent'); }],
+    [{ intent: 'loan', amount: 3000, person: 'Ali' }, 'lent Ali 3000', (e) => { assert.strictEqual(e.type, 'loan'); assert.strictEqual(e.person, 'Ali'); }],
+    [{ intent: 'repayment', amount: 1000, person: 'Sara', note: 'invented words' }, 'Sara paid back 1000', (e) => { assert.strictEqual(e.person, 'Sara'); assert.strictEqual(e.note, null, 'a note that was not said is dropped'); }],
+    [{ intent: 'opening_balance', amount: 80000 }, 'I have 80000 right now', (e) => { assert.strictEqual(e.type, 'opening_balance'); }],
+  ];
+  for (const [ai, transcript, check] of cases) {
+    const r = runVoice(baseBody({ transcript }), { Gemini: () => toolUse({ status: 'parsed', message: 'ok', confidence: 0.95, ...ai }) });
+    const resp = r.responses[0].body;
+    assert.strictEqual(resp.status, 'parsed'); assert.strictEqual(resp.saved, false); assert.strictEqual(resp.needsReview, true);
+    assert(resp.reviewReasons.includes('other_entry')); assert.strictEqual(resp.intent, ai.intent); assert(!resp.expense);
+    check(resp.entry);
+    assert(!r.calls.some((c) => c.name.startsWith('Commit')), 'nothing is written for ' + ai.intent);
+  }
+});
+test('voice: an entry without a valid amount asks for it', () => {
+  const r = runVoice(baseBody({ transcript: 'got my salary' }), { Gemini: () => toolUse({ status: 'parsed', message: 'ok', intent: 'income', confidence: 0.9 }) });
+  assert.strictEqual(r.responses[0].body.status, 'needs_clarification');
+});
 test('voice: fixed category does not add to flexibleSpent', () => {
   const r = runVoice(baseBody({ transcript: 'rent 25000' }), { Gemini: () => toolUse({ status: 'parsed', message: 'ok', amount: 25000, categoryId: 'rent', confidence: 0.99 }) });
   assert.strictEqual(stat(r.calls.find((c) => c.name.startsWith('Commit')).body, 'flexibleSpent').increment.integerValue, '0');

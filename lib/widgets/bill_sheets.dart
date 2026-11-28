@@ -195,7 +195,7 @@ class _RecurringSheetState extends State<RecurringSheet> {
     }
 
     final messenger = ScaffoldMessenger.of(context);
-    final Future<void> write = existing == null
+    final Future<void> write = !_editing
         ? widget.data.recurring.add(item).then((_) {})
         : widget.data.recurring.update(item);
     write.then((_) {}, onError: (Object error) => reportSaveError(messenger, 'the bill'));

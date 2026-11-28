@@ -53,7 +53,8 @@ class _DebtSheetState extends State<DebtSheet> {
   String? _personError;
   String? _amountError;
 
-  bool get _editing => widget.existing != null;
+  /// False for a new debt and for a draft that came from voice (no id yet).
+  bool get _editing => widget.existing != null && widget.existing!.id.isNotEmpty;
   bool get _lent => _direction == DebtDirection.owedToMe;
 
   @override
@@ -111,7 +112,7 @@ class _DebtSheetState extends State<DebtSheet> {
 
     final messenger = ScaffoldMessenger.of(context);
     final Future<void> write =
-        existing == null ? widget.data.debts.add(debt).then((_) {}) : widget.data.debts.update(debt);
+        !_editing ? widget.data.debts.add(debt).then((_) {}) : widget.data.debts.update(debt);
     write.then((_) {}, onError: (Object error) => reportSaveError(messenger, 'the debt'));
     Navigator.of(context).pop(true);
   }
@@ -226,10 +227,11 @@ Future<bool?> showRepaymentSheet(
   required Debt debt,
   required String symbol,
   DebtPayment? payment,
+  int? amount,
 }) {
   return showAppSheet<bool>(
     context,
-    (_) => RepaymentSheet(data: data, debt: debt, symbol: symbol, payment: payment),
+    (_) => RepaymentSheet(data: data, debt: debt, symbol: symbol, payment: payment, amount: amount),
   );
 }
 
@@ -240,6 +242,7 @@ class RepaymentSheet extends StatefulWidget {
     required this.debt,
     required this.symbol,
     this.payment,
+    this.amount,
   });
 
   final UserData data;
@@ -247,19 +250,28 @@ class RepaymentSheet extends StatefulWidget {
   final String symbol;
   final DebtPayment? payment;
 
+  /// A suggested amount (from voice), used for a new repayment.
+  final int? amount;
+
   @override
   State<RepaymentSheet> createState() => _RepaymentSheetState();
 }
 
 class _RepaymentSheetState extends State<RepaymentSheet> {
   late final TextEditingController _amount = TextEditingController(
-    text: amountForField(widget.payment?.amount ?? widget.debt.remaining),
+    text: amountForField(widget.payment?.amount ?? _suggested),
   );
   late final TextEditingController _note = TextEditingController(text: widget.payment?.note ?? '');
   late DateTime _date = widget.payment?.date ?? DateTime.now();
   String? _amountError;
 
   bool get _editing => widget.payment != null;
+
+  int get _suggested {
+    final wanted = widget.amount;
+    if (wanted == null || wanted <= 0) return widget.debt.remaining;
+    return wanted > widget.debt.remaining ? widget.debt.remaining : wanted;
+  }
 
   /// The most this payment can be: what is left, plus this payment's own old
   /// amount when editing it.

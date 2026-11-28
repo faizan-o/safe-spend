@@ -731,6 +731,17 @@ class VoiceController extends ChangeNotifier {
     _notify();
   }
 
+  /// Call when a non-expense entry (income, a bill, a debt...) was saved.
+  void markEntrySaved(String message) {
+    notice = message;
+    result = null;
+    draft = null;
+    transcript = '';
+    errorMessage = null;
+    state = VoiceState.ready;
+    _notify();
+  }
+
   /// Throws the answer away and goes back to waiting.
   void discard() {
     if (state == VoiceState.sending) {

@@ -12,6 +12,10 @@ abstract class ReportClient {
   /// False when no n8n address is configured.
   bool get available;
 
+  /// Why the last call was skipped (for example `no_data`, `already_generated`
+  /// or `error: ...`), when the workflow said.
+  String? get lastReason;
+
   /// Returns the workflow's status: `generated` or `skipped` (nothing to
   /// report for that month). Throws [VoiceWorkflowException] on failure.
   Future<String> generate(String monthKey);
@@ -43,6 +47,9 @@ class N8nReportClient implements ReportClient {
   bool get available => true;
 
   @override
+  String? lastReason;
+
+  @override
   Future<String> generate(String monthKey) async {
     if (!DateKeys.isValidMonthKey(monthKey)) {
       throw const VoiceWorkflowException('That month is not valid.');
@@ -55,6 +62,7 @@ class N8nReportClient implements ReportClient {
       token: await idToken?.call(),
       timeout: timeout,
     );
+    lastReason = decoded is Map && decoded['reason'] is String ? decoded['reason'] as String : null;
     final status = decoded is Map && decoded['status'] is String ? decoded['status'] as String : 'failed';
     if (status == 'failed') {
       final message = decoded is Map && decoded['message'] is String ? decoded['message'] as String : null;
@@ -67,6 +75,9 @@ class N8nReportClient implements ReportClient {
 class UnavailableReportClient implements ReportClient {
   @override
   bool get available => false;
+
+  @override
+  String? get lastReason => null;
 
   @override
   Future<String> generate(String monthKey) {
