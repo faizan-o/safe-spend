@@ -98,3 +98,7 @@ firestore.rules, firestore.indexes.json
 2. n8n: import and activate the workflows, add credentials, edit each Config node.
 3. Run with `--dart-define=N8N_BASE_URL=.../webhook`; add the Android/iOS permissions from docs/voice-n8n.md.
 4. `flutter analyze` and `flutter test`.
+
+## Notifications
+
+Daily, bill, debt and budget reminders are local notifications; see [docs/notifications.md](docs/notifications.md) for the one-time Android setup and how to test.

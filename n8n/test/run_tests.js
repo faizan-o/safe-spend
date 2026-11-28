@@ -159,6 +159,10 @@ test('voice: income, bills, debts and repayments are read but never written', ()
   const cases = [
     [{ intent: 'income', amount: 50000, source: 'salary', transcript: 'received 50000 salary' }, 'received 50000 salary', (e) => { assert.strictEqual(e.type, 'income'); assert.strictEqual(e.amount, 50000); assert.strictEqual(e.source, 'salary'); }],
     [{ intent: 'bill', amount: 25000, title: 'rent', categoryId: 'rent', frequency: 'monthly', dueDate: day(10) }, 'rent 25000 monthly due soon', (e) => { assert.strictEqual(e.type, 'bill'); assert.strictEqual(e.title, 'rent'); assert.strictEqual(e.frequency, 'monthly'); assert.strictEqual(e.dueDate, day(10)); assert.strictEqual(e.categoryId, 'rent'); }],
+    [{ intent: 'bill_paid', title: 'electricity' }, 'paid the electricity bill', (e) => { assert.strictEqual(e.type, 'bill_paid'); assert.strictEqual(e.title, 'electricity'); assert.strictEqual(e.amount, 0); }],
+    [{ intent: 'budget', amount: 60000, frequency: 'weekly' }, 'my weekly budget is 60000', (e) => { assert.strictEqual(e.type, 'budget'); assert.strictEqual(e.amount, 60000); assert.strictEqual(e.frequency, 'weekly'); }],
+    [{ intent: 'budget', amount: 60000, frequency: 'once' }, 'budget 60000', (e) => { assert.strictEqual(e.frequency, 'monthly'); }],
+    [{ intent: 'category_budget', amount: 20000, categoryId: 'food' }, 'food budget 20000', (e) => { assert.strictEqual(e.type, 'category_budget'); assert.strictEqual(e.categoryId, 'food'); assert.strictEqual(e.amount, 20000); }],
     [{ intent: 'loan', amount: 3000, person: 'Ali' }, 'lent Ali 3000', (e) => { assert.strictEqual(e.type, 'loan'); assert.strictEqual(e.person, 'Ali'); }],
     [{ intent: 'repayment', amount: 1000, person: 'Sara', note: 'invented words' }, 'Sara paid back 1000', (e) => { assert.strictEqual(e.person, 'Sara'); assert.strictEqual(e.note, null, 'a note that was not said is dropped'); }],
     [{ intent: 'opening_balance', amount: 80000 }, 'I have 80000 right now', (e) => { assert.strictEqual(e.type, 'opening_balance'); }],

@@ -1,18 +1,46 @@
 import 'map_readers.dart';
 
-/// When (and whether) to send the daily reminder.
+/// What the app may remind the user about, and when.
+///
+/// [enabled], [hour] and [minute] are the daily "log your spending" reminder
+/// (the first version only had that one). The rest switch the other kinds.
 class ReminderSettings {
-  const ReminderSettings({this.enabled = true, this.hour = 21, this.minute = 0});
+  const ReminderSettings({
+    this.enabled = true,
+    this.hour = 21,
+    this.minute = 0,
+    this.bills = true,
+    this.debts = true,
+    this.budgetAlerts = true,
+    this.dueHour = 9,
+  });
 
+  /// The daily reminder to log spending.
   final bool enabled;
   final int hour;
   final int minute;
 
+  /// Bills and expected income that are coming due.
+  final bool bills;
+
+  /// Debts to repay and loans to collect that are coming due.
+  final bool debts;
+
+  /// A heads-up when a category reaches 90% of its limit, and when it goes over.
+  final bool budgetAlerts;
+
+  /// The hour of the day (0-23) reminders about due dates arrive.
+  final int dueHour;
+
   factory ReminderSettings.fromMap(Map<String, dynamic> map) {
     return ReminderSettings(
       enabled: readBool(map, 'enabled', true),
-      hour: readInt(map, 'hour', 21),
-      minute: readInt(map, 'minute', 0),
+      hour: readInt(map, 'hour', 21).clamp(0, 23).toInt(),
+      minute: readInt(map, 'minute', 0).clamp(0, 59).toInt(),
+      bills: readBool(map, 'bills', true),
+      debts: readBool(map, 'debts', true),
+      budgetAlerts: readBool(map, 'budgetAlerts', true),
+      dueHour: readInt(map, 'dueHour', 9).clamp(0, 23).toInt(),
     );
   }
 
@@ -20,15 +48,34 @@ class ReminderSettings {
         'enabled': enabled,
         'hour': hour,
         'minute': minute,
+        'bills': bills,
+        'debts': debts,
+        'budgetAlerts': budgetAlerts,
+        'dueHour': dueHour,
       };
 
-  ReminderSettings copyWith({bool? enabled, int? hour, int? minute}) {
+  ReminderSettings copyWith({
+    bool? enabled,
+    int? hour,
+    int? minute,
+    bool? bills,
+    bool? debts,
+    bool? budgetAlerts,
+    int? dueHour,
+  }) {
     return ReminderSettings(
       enabled: enabled ?? this.enabled,
       hour: hour ?? this.hour,
       minute: minute ?? this.minute,
+      bills: bills ?? this.bills,
+      debts: debts ?? this.debts,
+      budgetAlerts: budgetAlerts ?? this.budgetAlerts,
+      dueHour: dueHour ?? this.dueHour,
     );
   }
+
+  /// True when any scheduled reminder is switched on.
+  bool get anyScheduled => enabled || bills || debts;
 }
 
 /// The user's profile and settings. Stored at users/{uid}; the document id is

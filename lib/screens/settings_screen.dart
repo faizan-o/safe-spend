@@ -11,6 +11,7 @@ import '../settings/theme_controller.dart';
 import '../theme.dart';
 import '../utils/formatters.dart';
 import '../utils/responsive.dart';
+import '../widgets/notification_settings_card.dart';
 import '../widgets/opening_balance_sheet.dart';
 
 void openSettings(BuildContext context, AuthService auth, AuthUser user, {UserData? data}) {
@@ -59,6 +60,9 @@ class SettingsScreen extends StatelessWidget {
             const SizedBox(height: 24),
             _SectionLabel('Money'),
             _OpeningBalanceCard(data: data!),
+            const SizedBox(height: 24),
+            _SectionLabel('Reminders and alerts'),
+            NotificationSettingsCard(data: data!),
           ],
           const SizedBox(height: 24),
           _SectionLabel('Account'),

@@ -9,6 +9,9 @@ import '../services/auth_service.dart';
 import '../theme.dart';
 import '../utils/responsive.dart';
 import '../logic/dashboard_controller.dart';
+import '../notifications/notification_coordinator.dart';
+import '../notifications/notification_service.dart';
+import '../notifications/reminder_planner.dart';
 import 'bills_screen.dart';
 import 'dashboard_screen.dart';
 import 'debts_screen.dart';
@@ -39,10 +42,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   static const int _voiceTab = 0;
   static const int _dashboardTab = 1;
   static const int _billsTab = 2;
+  static const int _debtsTab = 3;
 
   final GlobalKey<VoiceScreenState> _voiceKey = GlobalKey<VoiceScreenState>();
 
   late final DashboardController _controller = DashboardController(widget.data);
+
+  late final NotificationCoordinator _notifications = NotificationCoordinator(_controller);
+  StreamSubscription<String>? _taps;
 
   int _index = _voiceTab;
 
@@ -51,10 +58,36 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _recordDueItems();
+    _notifications.start();
+    final service = NotificationService.instance;
+    _taps = service.taps.listen(_openFromNotification);
+    // The app was opened by tapping a notification while it was closed.
+    service.init().then((_) {
+      final payload = service.launchPayload;
+      service.launchPayload = null;
+      if (payload != null && mounted) _openFromNotification(payload);
+    });
+  }
+
+  /// Takes the user to the screen a tapped notification is about.
+  void _openFromNotification(String payload) {
+    if (!mounted) return;
+    switch (payload) {
+      case ReminderPayload.daily:
+        _go(_voiceTab);
+      case ReminderPayload.bills:
+        _go(_billsTab);
+      case ReminderPayload.debts:
+        _go(_debtsTab);
+      case ReminderPayload.budget:
+        _go(_dashboardTab);
+    }
   }
 
   @override
   void dispose() {
+    unawaited(_taps?.cancel());
+    _notifications.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
@@ -67,6 +100,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (state != AppLifecycleState.resumed) return;
     _controller.refreshToday();
     _recordDueItems();
+    _notifications.refresh(force: true);
   }
 
   /// Bills set to "record automatically" are added once their date arrives.

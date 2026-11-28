@@ -43,19 +43,25 @@ if (KIND === 'voice') {
 const heard = KIND === 'voice' ? (a.transcript || cleanText(t.heard, 1000) || null) : null;
 if (KIND === 'voice' && a.audio && !heard && status === 'parsed') { status = 'needs_clarification'; message = 'I could not hear that clearly. Please try again, a little closer to the microphone.'; }
 if (status !== 'parsed') return respond(200, { status, message: message || 'I need a bit more detail.', confidence: conf, transcript: heard });
-if (!Number.isFinite(rupees) || rupees <= 0 || rupees > maxAmount) return respond(200, { status: 'needs_clarification', message: 'I could not work out a valid amount. How much was it?', confidence: conf });
+if (t.intent !== 'bill_paid' && (!Number.isFinite(rupees) || rupees <= 0 || rupees > maxAmount)) return respond(200, { status: 'needs_clarification', message: 'I could not work out a valid amount. How much was it?', confidence: conf });
 
 // Income, bills, debts, loans, repayments and the opening balance are only read here, never written:
 // the app shows them pre-filled for the user to check and saves them itself.
-const INTENTS = ['income', 'bill', 'debt', 'loan', 'repayment', 'opening_balance'];
+const INTENTS = ['income', 'bill', 'bill_paid', 'budget', 'category_budget', 'debt', 'loan', 'repayment', 'opening_balance'];
 const intent = KIND === 'voice' && INTENTS.includes(t.intent) ? t.intent : 'expense';
 if (intent !== 'expense') {
   const said = String(t.heard || a.transcript || '').toLowerCase();
   const words = (x) => String(x || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2);
   const sayOnly = (x, max) => { const v = cleanText(x, max); return v && words(v).some((w) => said.includes(w)) ? v : ''; };
   const day = (x, clamp) => { if (!isLocalDate(x)) return null; return clamp && x > a.ctx.localDate ? a.ctx.localDate : x; };
-  const entry = { type: intent, amount: toRupees(toMinor(rupees)), note: sayOnly(t.note, 120) || null };
+  const entry = { type: intent, amount: Number.isFinite(rupees) && rupees > 0 && rupees <= maxAmount ? toRupees(toMinor(rupees)) : 0, note: sayOnly(t.note, 120) || null };
   if (intent === 'income') { entry.source = sayOnly(t.source, 100) || null; entry.date = day(dateStr, true); }
+  if (intent === 'budget') entry.frequency = ['weekly', 'monthly', 'yearly'].includes(t.frequency) ? t.frequency : 'monthly';
+  if (intent === 'category_budget') {
+    const { cat: bc, exact: bx } = pickCategory(p.cats, catId);
+    entry.categoryId = bc.id; entry.categoryName = bc.name; entry.categoryUncertain = !bx;
+  }
+  if (intent === 'bill_paid') { entry.title = sayOnly(t.title, 100) || null; entry.date = day(dateStr, true); }
   if (intent === 'bill') {
     const { cat: bc, exact: bx } = pickCategory(p.cats, catId);
     entry.title = sayOnly(t.title, 100) || null; entry.categoryId = bc.id; entry.categoryName = bc.name; entry.categoryUncertain = !bx;

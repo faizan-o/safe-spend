@@ -103,10 +103,10 @@ class ParsedExpense {
 }
 
 /// What kind of entry the workflow found besides an expense.
-enum VoiceEntryType { income, bill, debt, loan, repayment, openingBalance }
+enum VoiceEntryType { income, bill, billPaid, budget, categoryBudget, debt, loan, repayment, openingBalance }
 
 /// Something other than an expense that was said: income, a bill, a debt, a
-/// loan, a repayment or the opening balance. It is never saved by the
+/// loan, a repayment, a bill that was paid or the opening balance. It is never saved by the
 /// workflow; the app shows it filled in for the user to check.
 class VoiceEntry {
   const VoiceEntry({
@@ -117,6 +117,7 @@ class VoiceEntry {
     this.person,
     this.note,
     this.categoryId,
+    this.categoryName,
     this.frequency,
     this.date,
     this.dueDate,
@@ -137,8 +138,9 @@ class VoiceEntry {
   final String? person;
   final String? note;
   final String? categoryId;
+  final String? categoryName;
 
-  /// Bill: once, daily, weekly, monthly or yearly.
+  /// Bill: once, daily, weekly, monthly or yearly. Budget: weekly, monthly or yearly.
   final String? frequency;
 
   /// When it happened; null means today.
@@ -153,6 +155,9 @@ class VoiceEntry {
     final type = switch (map['type']) {
       'income' => VoiceEntryType.income,
       'bill' => VoiceEntryType.bill,
+      'bill_paid' => VoiceEntryType.billPaid,
+      'budget' => VoiceEntryType.budget,
+      'category_budget' => VoiceEntryType.categoryBudget,
       'debt' => VoiceEntryType.debt,
       'loan' => VoiceEntryType.loan,
       'repayment' => VoiceEntryType.repayment,
@@ -160,16 +165,19 @@ class VoiceEntry {
       _ => null,
     };
     final amount = VoiceWorkflowResult._asDouble(map['amount']);
-    if (type == null || amount == null || amount <= 0) return null;
+    if (type == null) return null;
+    // Saying you paid a bill needs no amount: the bill already has one.
+    if (type != VoiceEntryType.billPaid && (amount == null || amount <= 0)) return null;
     DateTime? day(Object? value) => value is String ? DateTime.tryParse(value.trim()) : null;
     return VoiceEntry(
       type: type,
-      amount: amount,
+      amount: amount ?? 0,
       source: VoiceWorkflowResult._asString(map['source']),
       title: VoiceWorkflowResult._asString(map['title']),
       person: VoiceWorkflowResult._asString(map['person']),
       note: VoiceWorkflowResult._asString(map['note']),
       categoryId: VoiceWorkflowResult._asString(map['categoryId']),
+      categoryName: VoiceWorkflowResult._asString(map['categoryName']),
       frequency: VoiceWorkflowResult._asString(map['frequency']),
       date: day(map['date']),
       dueDate: day(map['dueDate']),

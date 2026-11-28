@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../data/user_data.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
+import '../utils/formatters.dart';
 import '../utils/platform_support.dart';
 import '../utils/receipt_image.dart';
 import '../voice/receipt_client.dart';
@@ -16,7 +17,9 @@ import '../voice/voice_controller.dart';
 import '../voice/voice_workflow_client.dart';
 import '../widgets/auth_widgets.dart';
 import 'settings_screen.dart';
+import '../models/budget_period.dart';
 import '../models/category.dart';
+import '../models/monthly_budget.dart';
 import '../models/date_keys.dart';
 import '../models/debt.dart';
 import '../models/income.dart';
@@ -64,6 +67,10 @@ class VoiceScreenState extends State<VoiceScreen> {
     'Received 50,000 salary',
     'Rent 25,000 due on the 1st',
     'Lent Ali 3,000',
+    'Ali paid back 1,000',
+    'Paid the electricity bill',
+    'Food budget 20,000',
+    'My monthly budget is 60,000',
   ];
 
   late final VoiceController _controller;
@@ -213,6 +220,129 @@ class VoiceScreenState extends State<VoiceScreen> {
     return DateTime(day.year, day.month, day.day, 12);
   }
 
+  Future<bool> _confirm(String title, String body) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
+  void _say(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// "My monthly budget is 60,000": changes the budget of the current week,
+  /// month or year, or starts one (copying the category limits of the latest).
+  Future<bool> _applyBudget(VoiceEntry entry, int amount) async {
+    var type = PeriodType.monthly;
+    for (final t in PeriodType.values) {
+      if (t.name == entry.frequency && t != PeriodType.custom) type = t;
+    }
+    final symbol = _controller.symbol;
+    final repo = widget.data.budgets;
+    final budgets = await repo.getBudgets();
+    if (!mounted) return false;
+    final today = DateTime.now();
+    final start = BudgetPeriod.defaultStart(type, today);
+    final period = BudgetPeriod.starting(type, start);
+    final label = type.label.toLowerCase();
+
+    MonthlyBudget? existing;
+    for (final b in budgets) {
+      if (b.periodType == type && b.startDay == period.startDay) existing = b;
+    }
+    if (existing != null) {
+      final ok = await _confirm(
+        'Change your $label budget?',
+        'From ${formatMoney(existing.income, symbol)} to ${formatMoney(amount, symbol)}.',
+      );
+      if (!ok) return false;
+      await repo.saveBudget(existing.copyWith(income: amount));
+      return true;
+    }
+    final ok = await _confirm(
+      'Start a $label budget?',
+      '${formatMoney(amount, symbol)} for ${period.startDay} to ${period.endDay}. '
+          '${budgets.isEmpty ? 'You can set category limits afterwards, in the Dashboard.' : 'Category limits are copied from your latest budget.'}',
+    );
+    if (!ok) return false;
+    final latest = budgets.isEmpty ? null : budgets.first;
+    await repo.saveBudget(MonthlyBudget(
+      id: repo.newIdFor(period),
+      monthKey: DateKeys.ofMonth(period.start),
+      income: amount,
+      categories: latest?.categories ?? const [],
+      periodType: type,
+      startDay: period.startDay,
+      endDay: period.endDay,
+    ));
+    return true;
+  }
+
+  /// "Food budget 20,000": sets one category's limit in the budget that covers today.
+  Future<bool> _applyCategoryLimit(VoiceEntry entry, int limit) async {
+    final symbol = _controller.symbol;
+    final budgets = await widget.data.budgets.getBudgets();
+    if (!mounted) return false;
+    final today = DateTime.now();
+    MonthlyBudget? budget;
+    for (final b in budgets) {
+      if (b.period.contains(today)) {
+        budget = b;
+        break;
+      }
+    }
+    if (budget == null) {
+      _say('There is no budget for today yet. Say "my monthly budget is 60,000" first.');
+      return false;
+    }
+    ExpenseCategory? category;
+    for (final item in _controller.categories) {
+      if (item.id == entry.categoryId) category = item;
+    }
+    final line = budget.forCategory(entry.categoryId ?? '');
+    final name = line?.name ?? category?.name;
+    if (name == null) {
+      _say('I could not tell which category that is. Try "food budget 20,000".');
+      return false;
+    }
+    final ok = await _confirm(
+      line == null ? 'Add a limit for $name?' : 'Change the $name limit?',
+      line == null
+          ? '${formatMoney(limit, symbol)} for $name in your ${budget.periodType.label.toLowerCase()} budget.'
+          : 'From ${formatMoney(line.limit, symbol)} to ${formatMoney(limit, symbol)}.',
+    );
+    if (!ok) return false;
+    final lines = [
+      for (final c in budget.categories)
+        if (c.categoryId == entry.categoryId)
+          CategoryBudget.fromCategory(
+            category ?? ExpenseCategory(id: c.categoryId, name: c.name, iconKey: c.iconKey, colorValue: c.colorValue, kind: c.kind),
+            limit,
+          )
+        else
+          c,
+      if (line == null && category != null) CategoryBudget.fromCategory(category, limit),
+    ];
+    await widget.data.budgets.saveBudget(budget.copyWith(categories: lines));
+    return true;
+  }
+
   /// Opens the matching form, filled in with what was said.
   Future<void> _reviewEntry() async {
     final entry = _controller.result?.entry;
@@ -262,6 +392,37 @@ class VoiceScreenState extends State<VoiceScreen> {
           ),
         );
         message = 'Bill saved.';
+      case VoiceEntryType.billPaid:
+        final bills = await data.recurring.getAll();
+        if (!mounted) return;
+        final said = (entry.title ?? '').toLowerCase().trim();
+        RecurringItem? bill;
+        for (final item in bills) {
+          if (!item.active || said.isEmpty) continue;
+          final name = item.title.toLowerCase();
+          if (name.contains(said) || said.contains(name)) {
+            bill = item;
+            break;
+          }
+        }
+        if (bill == null) {
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(SnackBar(
+              content: Text(said.isEmpty
+                  ? 'Say which bill, for example "paid the electricity bill".'
+                  : 'No open bill called "${entry.title}". Add it first in the Bills tab.'),
+            ));
+          return;
+        }
+        saved = await showMarkPaidSheet(context, data: data, item: bill, symbol: symbol);
+        message = 'Bill marked as paid.';
+      case VoiceEntryType.budget:
+        saved = await _applyBudget(entry, minor);
+        message = 'Budget saved.';
+      case VoiceEntryType.categoryBudget:
+        saved = await _applyCategoryLimit(entry, minor);
+        message = 'Category limit saved.';
       case VoiceEntryType.debt:
       case VoiceEntryType.loan:
         final lent = entry.type == VoiceEntryType.loan;

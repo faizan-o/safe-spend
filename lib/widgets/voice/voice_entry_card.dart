@@ -18,6 +18,9 @@ class VoiceEntryCard extends StatelessWidget {
   (IconData, String) get _kind => switch (entry.type) {
         VoiceEntryType.income => (Icons.south_west, 'Income'),
         VoiceEntryType.bill => (Icons.receipt_long_outlined, 'Bill'),
+        VoiceEntryType.billPaid => (Icons.check_circle_outline, 'Bill paid'),
+        VoiceEntryType.budget => (Icons.pie_chart_outline, 'Budget'),
+        VoiceEntryType.categoryBudget => (Icons.tune, 'Category limit'),
         VoiceEntryType.debt => (Icons.north_east, 'Debt (you owe)'),
         VoiceEntryType.loan => (Icons.handshake_outlined, 'Loan (owed to you)'),
         VoiceEntryType.repayment => (Icons.payments_outlined, 'Repayment'),
@@ -37,6 +40,12 @@ class VoiceEntryCard extends StatelessWidget {
         add(entry.title);
         add(entry.frequency == null || entry.frequency == 'once' ? null : entry.frequency);
         if (entry.dueDate != null) add('due ${shortDate(entry.dueDate!)}');
+      case VoiceEntryType.billPaid:
+        add(entry.title);
+      case VoiceEntryType.budget:
+        add(entry.frequency);
+      case VoiceEntryType.categoryBudget:
+        add(entry.categoryName);
       case VoiceEntryType.debt:
       case VoiceEntryType.loan:
         add(entry.person);
@@ -80,7 +89,9 @@ class VoiceEntryCard extends StatelessWidget {
                     children: [
                       Text(label, style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
                       Text(
-                        Money.format(minor, symbol: controller.symbol, showDecimals: minor % 100 != 0),
+                        minor > 0
+                            ? Money.format(minor, symbol: controller.symbol, showDecimals: minor % 100 != 0)
+                            : (entry.title ?? 'A bill'),
                         style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ],
