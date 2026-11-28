@@ -22,9 +22,6 @@ Future<void> main() async {
   runApp(SafeSpendApp(auth: backend.auth, database: backend.database));
 }
 
-/// Uses Firebase (sign-in and Firestore) when `flutterfire configure` has been
-/// run, and the on-device demo sign-in otherwise (or if Firebase cannot start
-/// on this platform). Demo mode has no database.
 Future<_Backend> _startBackend() async {
   try {
     final options = DefaultFirebaseOptions.currentPlatform;

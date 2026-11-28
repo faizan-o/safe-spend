@@ -5,7 +5,7 @@ Three importable workflows in `workflows/`. They read and write the same Firesto
 
 | File | Webhook | What it does |
 | --- | --- | --- |
-| `safespend-voice-expense.json` | `POST /webhook/safespend/voice` | speech-to-text sentence → one expense → saved for the signed-in user |
+| `safespend-voice-expense.json` | `POST /webhook/safespend/voice` | speech-to-text sentence → one expense or command → saved / prefilled for the signed-in user |
 | `safespend-receipt-scanner.json` | `POST /webhook/safespend/receipt` | photo/PDF of a receipt, bill or payment screenshot → expense (with line items) |
 | `safespend-monthly-report.json` | `POST /webhook/safespend/report` + monthly schedule | month-end report: where you overspent, where you saved, what to improve |
 

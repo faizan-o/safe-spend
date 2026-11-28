@@ -1,9 +1,33 @@
 # SafeSpend
 
-Monthly finance manager that shows one daily safe-to-spend number.
-Voice and receipt expense entry, a safe-to-spend dashboard, and AI month-end reports.
+**Know what you can spend today.** SafeSpend is a monthly finance manager that splits your budget over the days left and shows one daily safe-to-spend number. Say what you bought, in English, Urdu or Roman Urdu, and it is written down.
 
-Features: opening balance and a live balance; budgets for a week, month, year or custom dates (several at once); income as well as expenses; bills, rent and fees with due dates, reminders and optional automatic recording; debts and loans with repayments and due dates; and editing of every expense, income, receipt and its items. Sign-in uses Firebase; the AI parts run in n8n with Gemini.
+**Live web app: [safespend0.netlify.app](https://safespend0.netlify.app)**
+
+Also available as an Android app (APK) and a Windows build, from the project's landing page.
+
+## Features
+
+- **Safe-to-spend dashboard.** One number for today, red and green flags, category progress and a live balance.
+- **Voice entry.** Speak or type an expense, income, bill, debt, loan or repayment; mark a bill paid; set a total or category budget; add an opening balance. Anything beyond a plain expense opens a prefilled form so you confirm it first.
+- **Receipt scanner.** Photograph a receipt; the total, shop and line items are read for you to check and save.
+- **Budgets** for a week, month, year or custom dates, several at once, with per-category limits.
+- **Income and expenses**, an opening balance, and editing of every expense, income, receipt and item.
+- **Bills, rent and fees** with due dates, reminders and optional automatic recording.
+- **Debts and loans** with repayments and due dates.
+- **Monthly expense report** by AI: where you overspent, where you saved, what to improve.
+- **Reminders** (Android, iOS, macOS): a daily nudge, bills and debts coming due, and budget alerts at 90% and 100%.
+
+## Tech
+
+Flutter (Material 3) with Firebase Auth and Cloud Firestore. The AI parts (voice parsing, receipt reading, monthly reports) run as n8n workflows that call Gemini. Money is stored as integer minor units.
+
+| Platform | Status |
+| --- | --- |
+| Web | Live at [safespend0.netlify.app](https://safespend0.netlify.app) |
+| Android | APK download |
+| Windows | Zip download (no desktop reminders) |
+| iOS, macOS | Buildable from source; not published |
 
 ## Run it
 
@@ -11,7 +35,7 @@ This folder holds the Dart code only. Generate the Android/iOS platform folders 
 
 ```bash
 cd safespend
-flutter create . --project-name safespend --platforms=android,ios
+flutter create . --project-name safespend --platforms=android,ios,web,windows
 flutter pub get
 flutter run --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook   # leave the define out to use dummy voice/receipt
 ```
@@ -75,7 +99,7 @@ lib/
   report/report_client.dart       asks n8n to (re)build a month report
   screens/
     auth_gate / welcome / sign_in / sign_up / forgot_password
-    main_shell.dart               tabs: Voice (default), Dashboard, Bills, Debts, Receipts
+    main_shell.dart               tabs: Voice (default), Dashboard, Bills, Debts, Report; Receipts from the Dashboard menu
     receipts_screen.dart          timestamped receipts and receipt detail
     voice_screen.dart             speak, type or scan a receipt
     dashboard_screen.dart         safe-to-spend, flags, progress, expenses
@@ -85,6 +109,23 @@ n8n/                              importable workflows, schema, README, local te
 docs/                             database.md, voice-n8n.md
 firestore.rules, firestore.indexes.json
 ```
+
+## Build and publish
+
+```bash
+# Web (host build/web on Firebase Hosting, Netlify or similar)
+flutter build web --release --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook
+
+# Android APK -> build/app/outputs/flutter-apk/app-release.apk
+flutter build apk --release --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook
+
+# Windows -> zip everything inside build/windows/x64/runner/Release
+flutter build windows --release --dart-define=N8N_BASE_URL=https://YOUR-N8N-HOST/webhook
+```
+
+If the Windows build stops with *Compatibility with CMake < 3.5 has been removed* (the Firebase C++ SDK does this with CMake 4), set `CMAKE_POLICY_VERSION_MINIMUM=3.5` first (PowerShell: `$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"`).
+
+The product landing page with the download buttons lives in a separate static folder (plain HTML, CSS and JavaScript).
 
 ## Docs
 

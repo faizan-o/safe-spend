@@ -623,7 +623,10 @@ class VoiceController extends ChangeNotifier {
   Expense? _buildDraft(VoiceWorkflowResult answer, String? spoken, ExpenseSource source, [String? receiptId]) {
     final parsed = answer.expense;
     if (answer.status != VoiceWorkflowStatus.parsed || parsed == null) return null;
+    return _expenseFrom(parsed, answer.confidence, spoken, source, receiptId);
+  }
 
+  Expense? _expenseFrom(ParsedExpense parsed, double? confidence, String? spoken, ExpenseSource source, [String? receiptId]) {
     final minor = Money.fromMajor(parsed.amount);
     if (minor <= 0) return null;
 
@@ -640,7 +643,7 @@ class VoiceController extends ChangeNotifier {
       source: source,
       transcript: spoken,
       merchant: parsed.merchant,
-      confidence: answer.confidence,
+      confidence: confidence,
       receiptId: receiptId,
       items: [
         for (final item in parsed.items)

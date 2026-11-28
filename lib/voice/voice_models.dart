@@ -267,33 +267,8 @@ class VoiceWorkflowResult {
       _ => VoiceWorkflowStatus.failed,
     };
 
-    ParsedExpense? expense;
     final rawExpense = json['expense'];
-    if (rawExpense is Map) {
-      final map = Map<String, dynamic>.from(rawExpense);
-      final amount = _asDouble(map['amount']);
-      if (amount != null) {
-        final dateText = map['date'];
-        expense = ParsedExpense(
-          amount: amount,
-          categoryId: _asString(map['categoryId']),
-          categoryName: _asString(map['categoryName']),
-          note: _asString(map['note']),
-          merchant: _asString(map['merchant']),
-          items: [
-            for (final raw in map['items'] is List ? map['items'] as List : const [])
-              if (raw is Map && _asDouble(raw['amount']) != null && _asString(raw['description']) != null)
-                ParsedItem(
-                  description: _asString(raw['description'])!,
-                  amount: _asDouble(raw['amount'])!,
-                  quantity: (_asDouble(raw['quantity']) ?? 1).round().clamp(1, 1000),
-                ),
-          ],
-          date: dateText is String ? DateTime.tryParse(dateText.trim()) : null,
-          dateOnly: dateText is String && dateText.trim().length == 10,
-        );
-      }
-    }
+    final expense = rawExpense is Map ? _parseExpense(Map<String, dynamic>.from(rawExpense)) : null;
 
     return VoiceWorkflowResult(
       status: status,
@@ -312,6 +287,32 @@ class VoiceWorkflowResult {
           if (reason is String) reason,
       ],
     );
+  }
+
+  static ParsedExpense? _parseExpense(Map<String, dynamic> map) {
+      final amount = _asDouble(map['amount']);
+      if (amount != null) {
+        final dateText = map['date'];
+        return ParsedExpense(
+          amount: amount,
+          categoryId: _asString(map['categoryId']),
+          categoryName: _asString(map['categoryName']),
+          note: _asString(map['note']),
+          merchant: _asString(map['merchant']),
+          items: [
+            for (final raw in map['items'] is List ? map['items'] as List : const [])
+              if (raw is Map && _asDouble(raw['amount']) != null && _asString(raw['description']) != null)
+                ParsedItem(
+                  description: _asString(raw['description'])!,
+                  amount: _asDouble(raw['amount'])!,
+                  quantity: (_asDouble(raw['quantity']) ?? 1).round().clamp(1, 1000),
+                ),
+          ],
+          date: dateText is String ? DateTime.tryParse(dateText.trim()) : null,
+          dateOnly: dateText is String && dateText.trim().length == 10,
+        );
+      }
+    return null;
   }
 
   static double? _asDouble(Object? value) {

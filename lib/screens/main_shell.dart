@@ -44,6 +44,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   static const int _dashboardTab = 1;
   static const int _billsTab = 2;
   static const int _debtsTab = 3;
+  static const int _reportTab = 5;
 
   final GlobalKey<VoiceScreenState> _voiceKey = GlobalKey<VoiceScreenState>();
 
@@ -115,6 +116,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     setState(() => _index = index);
   }
 
+  void _openReceipts() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => ReceiptsScreen(
+          data: widget.data,
+          onScan: () {
+            Navigator.of(routeContext).pop();
+            _scan();
+          },
+        ),
+      ),
+    );
+  }
+
   /// Opens the Voice tab and starts the camera/gallery choice for a receipt.
   void _scan() {
     _go(_voiceTab);
@@ -145,6 +160,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           controller: _controller,
           onOpenVoice: wide ? null : () => _go(_voiceTab),
           onOpenBills: () => _go(_billsTab),
+          // Phones have no Receipts tab; it opens from the Dashboard menu.
+          onOpenReceipts: wide ? null : _openReceipts,
         ),
         BillsScreen(controller: _controller, data: widget.data),
         DebtsScreen(controller: _controller, data: widget.data),
@@ -162,20 +179,59 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     );
 
     if (!wide) {
-      // Phones: bottom navigation bar.
+      // Phones: Voice is the big round button in the middle, raised above the
+      // bar; Dashboard, Bills, Debts and Report sit in the bar, two each side.
+      final scheme = Theme.of(context).colorScheme;
+      final voiceSelected = _index == _voiceTab;
       return Scaffold(
         body: pages,
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: _go,
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Voice'),
-            NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Dashboard'),
-            NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Bills'),
-            NavigationDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: 'Debts'),
-            NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Receipts'),
-            NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: 'Report'),
-          ],
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+        floatingActionButton: Semantics(
+          label: 'Voice',
+          child: SizedBox(
+            width: 68,
+            height: 68,
+            child: FloatingActionButton(
+              heroTag: 'voice-tab',
+              elevation: 4,
+              shape: const CircleBorder(),
+              backgroundColor: voiceSelected ? scheme.primary : scheme.primaryContainer,
+              foregroundColor: voiceSelected ? scheme.onPrimary : scheme.onPrimaryContainer,
+              onPressed: () => _go(_voiceTab),
+              child: Icon(voiceSelected ? Icons.mic : Icons.mic_none, size: 34),
+            ),
+          ),
+        ),
+        bottomNavigationBar: BottomAppBar(
+          height: 68,
+          padding: EdgeInsets.zero,
+          shape: const CircularNotchedRectangle(),
+          notchMargin: 8,
+          child: Row(
+            children: [
+              _BarItem(icon: Icons.dashboard_outlined, selectedIcon: Icons.dashboard, label: 'Dashboard', selected: _index == _dashboardTab, onTap: () => _go(_dashboardTab)),
+              _BarItem(icon: Icons.event_note_outlined, selectedIcon: Icons.event_note, label: 'Bills', selected: _index == _billsTab, onTap: () => _go(_billsTab)),
+              // The gap under the round button, with its label.
+              SizedBox(
+                width: 84,
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      'Voice',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: voiceSelected ? scheme.primary : scheme.onSurfaceVariant,
+                            fontWeight: voiceSelected ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                    ),
+                  ),
+                ),
+              ),
+              _BarItem(icon: Icons.handshake_outlined, selectedIcon: Icons.handshake, label: 'Debts', selected: _index == _debtsTab, onTap: () => _go(_debtsTab)),
+              _BarItem(icon: Icons.insights_outlined, selectedIcon: Icons.insights, label: 'Report', selected: _index == _reportTab, onTap: () => _go(_reportTab)),
+            ],
+          ),
         ),
       );
     }
@@ -256,6 +312,53 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One of the four tabs in the phone's bottom bar.
+class _BarItem extends StatelessWidget {
+  const _BarItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = selected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
+    return Expanded(
+      child: InkResponse(
+        onTap: onTap,
+        radius: 36,
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label: label,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(selected ? selectedIcon : icon, color: color),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(color: color, fontWeight: selected ? FontWeight.w700 : FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

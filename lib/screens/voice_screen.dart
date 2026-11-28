@@ -347,6 +347,13 @@ class VoiceScreenState extends State<VoiceScreen> {
   Future<void> _reviewEntry() async {
     final entry = _controller.result?.entry;
     if (entry == null) return;
+    final done = await _reviewOne(entry);
+    if (done != null) _controller.markEntrySaved(done);
+  }
+
+  /// Opens the form for one entry. Returns the "saved" message, or null when
+  /// nothing was saved (cancelled, or it could not be matched).
+  Future<String?> _reviewOne(VoiceEntry entry) async {
     final c = _controller;
     final symbol = c.symbol;
     final minor = Money.fromMajor(entry.amount);
@@ -394,7 +401,7 @@ class VoiceScreenState extends State<VoiceScreen> {
         message = 'Bill saved.';
       case VoiceEntryType.billPaid:
         final bills = await data.recurring.getAll();
-        if (!mounted) return;
+        if (!mounted) return null;
         final said = (entry.title ?? '').toLowerCase().trim();
         RecurringItem? bill;
         for (final item in bills) {
@@ -413,7 +420,7 @@ class VoiceScreenState extends State<VoiceScreen> {
                   ? 'Say which bill, for example "paid the electricity bill".'
                   : 'No open bill called "${entry.title}". Add it first in the Bills tab.'),
             ));
-          return;
+          return null;
         }
         saved = await showMarkPaidSheet(context, data: data, item: bill, symbol: symbol);
         message = 'Bill marked as paid.';
@@ -443,7 +450,7 @@ class VoiceScreenState extends State<VoiceScreen> {
         message = lent ? 'Loan saved.' : 'Debt saved.';
       case VoiceEntryType.repayment:
         final debts = await data.debts.watchAll().first;
-        if (!mounted) return;
+        if (!mounted) return null;
         final name = (entry.person ?? '').toLowerCase();
         Debt? match;
         for (final debt in debts) {
@@ -462,7 +469,7 @@ class VoiceScreenState extends State<VoiceScreen> {
                   ? 'Say who it was, for example "Ali paid back 500".'
                   : 'No open debt or loan with "${entry.person}". Add it first in the Debts tab.'),
             ));
-          return;
+          return null;
         }
         saved = await showRepaymentSheet(context, data: data, debt: match, symbol: symbol, amount: minor);
         message = 'Repayment saved.';
@@ -476,7 +483,7 @@ class VoiceScreenState extends State<VoiceScreen> {
         );
         message = 'Opening balance saved.';
     }
-    if (saved == true) _controller.markEntrySaved(message);
+    return saved == true ? message : null;
   }
 
   String get _name {

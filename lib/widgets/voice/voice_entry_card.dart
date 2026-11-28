@@ -15,49 +15,9 @@ class VoiceEntryCard extends StatelessWidget {
   final VoiceEntry entry;
   final VoidCallback onReview;
 
-  (IconData, String) get _kind => switch (entry.type) {
-        VoiceEntryType.income => (Icons.south_west, 'Income'),
-        VoiceEntryType.bill => (Icons.receipt_long_outlined, 'Bill'),
-        VoiceEntryType.billPaid => (Icons.check_circle_outline, 'Bill paid'),
-        VoiceEntryType.budget => (Icons.pie_chart_outline, 'Budget'),
-        VoiceEntryType.categoryBudget => (Icons.tune, 'Category limit'),
-        VoiceEntryType.debt => (Icons.north_east, 'Debt (you owe)'),
-        VoiceEntryType.loan => (Icons.handshake_outlined, 'Loan (owed to you)'),
-        VoiceEntryType.repayment => (Icons.payments_outlined, 'Repayment'),
-        VoiceEntryType.openingBalance => (Icons.account_balance_wallet_outlined, 'Opening balance'),
-      };
+  (IconData, String) get _kind => voiceEntryKind(entry);
 
-  String get _summary {
-    final parts = <String>[];
-    void add(String? text) {
-      if (text != null && text.trim().isNotEmpty) parts.add(text.trim());
-    }
-
-    switch (entry.type) {
-      case VoiceEntryType.income:
-        add(entry.source);
-      case VoiceEntryType.bill:
-        add(entry.title);
-        add(entry.frequency == null || entry.frequency == 'once' ? null : entry.frequency);
-        if (entry.dueDate != null) add('due ${shortDate(entry.dueDate!)}');
-      case VoiceEntryType.billPaid:
-        add(entry.title);
-      case VoiceEntryType.budget:
-        add(entry.frequency);
-      case VoiceEntryType.categoryBudget:
-        add(entry.categoryName);
-      case VoiceEntryType.debt:
-      case VoiceEntryType.loan:
-        add(entry.person);
-        if (entry.dueDate != null) add('pay back by ${shortDate(entry.dueDate!)}');
-      case VoiceEntryType.repayment:
-        add(entry.person);
-      case VoiceEntryType.openingBalance:
-        break;
-    }
-    if (entry.date != null) add(shortDate(entry.date!));
-    return parts.join(' · ');
-  }
+  String get _summary => voiceEntrySummary(entry);
 
   @override
   Widget build(BuildContext context) {
@@ -123,4 +83,48 @@ class VoiceEntryCard extends StatelessWidget {
       ),
     );
   }
+}
+
+(IconData, String) voiceEntryKind(VoiceEntry entry) => switch (entry.type) {
+      VoiceEntryType.income => (Icons.south_west, 'Income'),
+      VoiceEntryType.bill => (Icons.receipt_long_outlined, 'Bill'),
+      VoiceEntryType.billPaid => (Icons.check_circle_outline, 'Bill paid'),
+      VoiceEntryType.budget => (Icons.pie_chart_outline, 'Budget'),
+      VoiceEntryType.categoryBudget => (Icons.tune, 'Category limit'),
+      VoiceEntryType.debt => (Icons.north_east, 'Debt (you owe)'),
+      VoiceEntryType.loan => (Icons.handshake_outlined, 'Loan (owed to you)'),
+      VoiceEntryType.repayment => (Icons.payments_outlined, 'Repayment'),
+      VoiceEntryType.openingBalance => (Icons.account_balance_wallet_outlined, 'Opening balance'),
+    };
+
+String voiceEntrySummary(VoiceEntry entry) {
+  final parts = <String>[];
+  void add(String? text) {
+    if (text != null && text.trim().isNotEmpty) parts.add(text.trim());
+  }
+
+  switch (entry.type) {
+    case VoiceEntryType.income:
+      add(entry.source);
+    case VoiceEntryType.bill:
+      add(entry.title);
+      add(entry.frequency == null || entry.frequency == 'once' ? null : entry.frequency);
+      if (entry.dueDate != null) add('due ${shortDate(entry.dueDate!)}');
+    case VoiceEntryType.billPaid:
+      add(entry.title);
+    case VoiceEntryType.budget:
+      add(entry.frequency);
+    case VoiceEntryType.categoryBudget:
+      add(entry.categoryName);
+    case VoiceEntryType.debt:
+    case VoiceEntryType.loan:
+      add(entry.person);
+      if (entry.dueDate != null) add('pay back by ${shortDate(entry.dueDate!)}');
+    case VoiceEntryType.repayment:
+      add(entry.person);
+    case VoiceEntryType.openingBalance:
+      break;
+  }
+  if (entry.date != null) add(shortDate(entry.date!));
+  return parts.join(' · ');
 }

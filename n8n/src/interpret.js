@@ -49,30 +49,37 @@ if (t.intent !== 'bill_paid' && (!Number.isFinite(rupees) || rupees <= 0 || rupe
 // the app shows them pre-filled for the user to check and saves them itself.
 const INTENTS = ['income', 'bill', 'bill_paid', 'budget', 'category_budget', 'debt', 'loan', 'repayment', 'opening_balance'];
 const intent = KIND === 'voice' && INTENTS.includes(t.intent) ? t.intent : 'expense';
-if (intent !== 'expense') {
-  const said = String(t.heard || a.transcript || '').toLowerCase();
-  const words = (x) => String(x || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2);
-  const sayOnly = (x, max) => { const v = cleanText(x, max); return v && words(v).some((w) => said.includes(w)) ? v : ''; };
-  const day = (x, clamp) => { if (!isLocalDate(x)) return null; return clamp && x > a.ctx.localDate ? a.ctx.localDate : x; };
-  const entry = { type: intent, amount: Number.isFinite(rupees) && rupees > 0 && rupees <= maxAmount ? toRupees(toMinor(rupees)) : 0, note: sayOnly(t.note, 120) || null };
-  if (intent === 'income') { entry.source = sayOnly(t.source, 100) || null; entry.date = day(dateStr, true); }
-  if (intent === 'budget') entry.frequency = ['weekly', 'monthly', 'yearly'].includes(t.frequency) ? t.frequency : 'monthly';
+const said = String(t.heard || a.transcript || '').toLowerCase();
+const words = (x) => String(x || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2);
+const sayOnly = (x, max) => { const v = cleanText(x, max); return v && words(v).some((w) => said.includes(w)) ? v : ''; };
+const day = (x, clamp) => { if (!isLocalDate(x)) return null; return clamp && x > a.ctx.localDate ? a.ctx.localDate : x; };
+const validAmount = (r) => Number.isFinite(r) && r > 0 && r <= maxAmount;
+
+// One non-expense entry (income, bill, debt...) from the fields of a model answer or of one of its extra items.
+function makeEntry(intent, m, rupees) {
+  const entry = { type: intent, amount: validAmount(rupees) ? toRupees(toMinor(rupees)) : 0, note: sayOnly(m.note, 120) || null };
+  if (intent === 'income') { entry.source = sayOnly(m.source, 100) || null; entry.date = day(m.date, true); }
+  if (intent === 'budget') entry.frequency = ['weekly', 'monthly', 'yearly'].includes(m.frequency) ? m.frequency : 'monthly';
   if (intent === 'category_budget') {
-    const { cat: bc, exact: bx } = pickCategory(p.cats, catId);
+    const { cat: bc, exact: bx } = pickCategory(p.cats, m.categoryId);
     entry.categoryId = bc.id; entry.categoryName = bc.name; entry.categoryUncertain = !bx;
   }
-  if (intent === 'bill_paid') { entry.title = sayOnly(t.title, 100) || null; entry.date = day(dateStr, true); }
+  if (intent === 'bill_paid') { entry.title = sayOnly(m.title, 100) || null; entry.date = day(m.date, true); }
   if (intent === 'bill') {
-    const { cat: bc, exact: bx } = pickCategory(p.cats, catId);
-    entry.title = sayOnly(t.title, 100) || null; entry.categoryId = bc.id; entry.categoryName = bc.name; entry.categoryUncertain = !bx;
-    entry.frequency = ['once', 'daily', 'weekly', 'monthly', 'yearly'].includes(t.frequency) ? t.frequency : 'once';
-    entry.dueDate = day(t.dueDate, false);
+    const { cat: bc, exact: bx } = pickCategory(p.cats, m.categoryId);
+    entry.title = sayOnly(m.title, 100) || null; entry.categoryId = bc.id; entry.categoryName = bc.name; entry.categoryUncertain = !bx;
+    entry.frequency = ['once', 'daily', 'weekly', 'monthly', 'yearly'].includes(m.frequency) ? m.frequency : 'once';
+    entry.dueDate = day(m.dueDate, false);
   }
   if (intent === 'debt' || intent === 'loan' || intent === 'repayment') {
-    entry.person = sayOnly(t.person, 100) || null; entry.date = day(dateStr, true);
-    if (intent !== 'repayment') entry.dueDate = day(t.dueDate, false);
+    entry.person = sayOnly(m.person, 100) || null; entry.date = day(m.date, true);
+    if (intent !== 'repayment') entry.dueDate = day(m.dueDate, false);
   }
-  if (intent === 'opening_balance') entry.date = day(dateStr, true);
+  if (intent === 'opening_balance') entry.date = day(m.date, true);
+  return entry;
+}
+if (intent !== 'expense') {
+  const entry = makeEntry(intent, t, rupees);
   const reasons = ['other_entry'];
   if (conf < minConf) reasons.push('low_confidence');
   return respond(200, { status: 'parsed', message: message || 'Got it.', confidence: Math.round(conf * 100) / 100, transcript: heard, needsReview: true, reviewReasons: reasons, intent, entry });

@@ -32,7 +32,7 @@ import 'budgets_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
 
-enum _MenuAction { budgets, transactions, settings, signOut }
+enum _MenuAction { budgets, transactions, receipts, settings, signOut }
 
 /// The main screen: the balance, today's safe-to-spend number, the budget at a
 /// glance, what is due soon, red and green flags, category progress and recent
@@ -46,6 +46,7 @@ class DashboardScreen extends StatefulWidget {
     required this.controller,
     this.onOpenVoice,
     this.onOpenBills,
+    this.onOpenReceipts,
   });
 
   final AuthService auth;
@@ -60,6 +61,9 @@ class DashboardScreen extends StatefulWidget {
 
   /// Opens the Bills tab ("See all" on the coming-up card).
   final VoidCallback? onOpenBills;
+
+  /// Opens the receipts list. Null when Receipts already has its own tab.
+  final VoidCallback? onOpenReceipts;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -267,17 +271,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _openBudgets();
                     case _MenuAction.transactions:
                       _openTransactions();
+                    case _MenuAction.receipts:
+                      widget.onOpenReceipts?.call();
                     case _MenuAction.settings:
                       openSettings(context, widget.auth, widget.user, data: widget.data);
                     case _MenuAction.signOut:
                       unawaited(_signOut());
                   }
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: _MenuAction.budgets, child: Text('Budgets')),
-                  PopupMenuItem(value: _MenuAction.transactions, child: Text('All transactions')),
-                  PopupMenuItem(value: _MenuAction.settings, child: Text('Settings')),
-                  PopupMenuItem(value: _MenuAction.signOut, child: Text('Sign out')),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: _MenuAction.budgets, child: Text('Budgets')),
+                  const PopupMenuItem(value: _MenuAction.transactions, child: Text('All transactions')),
+                  if (widget.onOpenReceipts != null) const PopupMenuItem(value: _MenuAction.receipts, child: Text('Receipts')),
+                  const PopupMenuItem(value: _MenuAction.settings, child: Text('Settings')),
+                  const PopupMenuItem(value: _MenuAction.signOut, child: Text('Sign out')),
                 ],
               ),
             ],
